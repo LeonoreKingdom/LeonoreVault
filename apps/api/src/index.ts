@@ -1,23 +1,25 @@
 import express, { type Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import { env } from './config/env.js';
 import { logger } from './middleware/logger.js';
+import { requestLogger } from './middleware/requestLogger.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { healthRouter } from './routes/health.js';
 
 const app: Express = express();
-const PORT = parseInt(process.env['PORT'] || '4000', 10);
 
 // ─── Global Middleware ──────────────────────────────────────
 app.use(helmet());
 app.use(
   cors({
-    origin: process.env['CORS_ORIGIN'] || 'http://localhost:3000',
+    origin: env.CORS_ORIGIN,
     credentials: true,
   }),
 );
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use(requestLogger);
 
 // ─── Routes ─────────────────────────────────────────────────
 app.use('/health', healthRouter);
@@ -31,9 +33,10 @@ app.use('/health', healthRouter);
 app.use(errorHandler);
 
 // ─── Start Server ───────────────────────────────────────────
-app.listen(PORT, () => {
-  logger.info(`🚀 LeonoreVault API running on http://localhost:${PORT}`);
-  logger.info(`📋 Health check: http://localhost:${PORT}/health`);
+app.listen(env.PORT, () => {
+  logger.info(`🚀 LeonoreVault API running on http://localhost:${env.PORT}`);
+  logger.info(`📋 Health check: http://localhost:${env.PORT}/health`);
+  logger.info(`🌍 Environment: ${env.NODE_ENV}`);
 });
 
 export default app;

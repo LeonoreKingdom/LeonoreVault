@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { logger } from './logger.js';
+import { env } from '../config/env.js';
 
 /**
  * Custom application error with an HTTP status code.
@@ -45,7 +46,7 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
     error: {
       code: 'INTERNAL_ERROR',
       message:
-        process.env['NODE_ENV'] === 'production' ? 'An unexpected error occurred' : err.message,
+        env.NODE_ENV === 'production' ? 'An unexpected error occurred' : err.message,
     },
   });
 }

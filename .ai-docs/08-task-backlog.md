@@ -86,7 +86,7 @@ Initialize Supabase local development environment. Create SQL migrations for all
 **Priority:** P0
 **Estimate:** 2h
 **Dependencies:** TASK-001
-**Status:** ⬜
+**Status:** ✅
 
 **Description:**
 Set up the Express server entry point, error handling middleware, logger (pino), and strictly typed environment variable loader (using Zod).

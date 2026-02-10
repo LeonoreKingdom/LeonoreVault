@@ -55,7 +55,8 @@ LeonoreVault is a comprehensive household inventory and management system design
 - [x] **TASK-001:** Monorepo & Workspace Initialization ✅
 - [x] **TASK-002:** Shared Types & Validators ✅
 - [x] **TASK-003:** Database Setup & Migrations ✅
-- [ ] **TASK-004:** Backend Boilerplate & Env Config ← NEXT
+- [x] **TASK-004:** Backend Boilerplate & Env Config ✅
+- [ ] **TASK-005:** Google OAuth Implementation ← NEXT
 
 ## Key Decisions Made
 
