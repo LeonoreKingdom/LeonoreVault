@@ -1,0 +1,42 @@
+{
+  "name": "leonorevault",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LeonoreVault — Household Inventory Management System",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LeonoreKingdom/LeonoreVault.git"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel -r run dev",
+    "dev:web": "pnpm --filter @leonorevault/web dev",
+    "dev:api": "pnpm --filter @leonorevault/api dev",
+    "build": "pnpm -r run build",
+    "build:web": "pnpm --filter @leonorevault/web build",
+    "build:api": "pnpm --filter @leonorevault/api build",
+    "lint": "pnpm -r run lint",
+    "lint:fix": "pnpm -r run lint -- --fix",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md,css}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,json,md,css}\"",
+    "typecheck": "pnpm -r run typecheck",
+    "clean": "pnpm -r exec -- rm -rf dist .next node_modules",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.0.0",
+    "@commitlint/config-conventional": "^19.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "eslint-config-prettier": "^10.0.0",
+    "husky": "^9.0.0",
+    "prettier": "^3.0.0",
+    "prettier-plugin-tailwindcss": "^0.6.0",
+    "typescript": "^5.7.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}

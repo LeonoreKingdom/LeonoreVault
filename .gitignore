@@ -1,0 +1,37 @@
+# ─── Dependencies ─────────────────────────
+node_modules/
+.pnpm-store/
+
+# ─── Build Outputs ───────────────────────
+dist/
+.next/
+out/
+
+# ─── Environment ─────────────────────────
+.env
+.env.local
+.env.*.local
+
+# ─── IDE ─────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ─── OS ──────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── Debug ───────────────────────────────
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# ─── Testing ─────────────────────────────
+coverage/
+
+# ─── Supabase ────────────────────────────
+supabase/.temp/
+
+# ─── Turbo ───────────────────────────────
+.turbo/
