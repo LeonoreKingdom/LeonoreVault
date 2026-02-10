@@ -2,15 +2,15 @@ import { z } from 'zod';
 
 // ─── Auth Schemas ───────────────────────────────────────────
 
-/** Google OAuth callback payload (code from PKCE flow) */
+/** Google OAuth callback payload */
 export const googleCallbackSchema = z.object({
   code: z.string().min(1, 'Authorization code is required'),
-  code_verifier: z.string().min(1, 'Code verifier is required'),
+  redirectUri: z.string().url('Must be a valid redirect URI'),
 });
 
 /** Token refresh request */
 export const refreshTokenSchema = z.object({
-  refresh_token: z.string().min(1, 'Refresh token is required'),
+  refreshToken: z.string().min(1, 'Refresh token is required'),
 });
 
 // ─── Inferred Types ─────────────────────────────────────────

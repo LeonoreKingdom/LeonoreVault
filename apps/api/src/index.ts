@@ -6,6 +6,7 @@ import { logger } from './middleware/logger.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { healthRouter } from './routes/health.js';
+import { authRouter } from './modules/auth/auth.routes.js';
 
 const app: Express = express();
 
@@ -23,9 +24,9 @@ app.use(requestLogger);
 
 // ─── Routes ─────────────────────────────────────────────────
 app.use('/health', healthRouter);
+app.use('/api/auth', authRouter);
 
 // Placeholder: Module routes will be registered here in later tasks
-// app.use('/api/v1/auth', authRouter);
 // app.use('/api/v1/households', householdRouter);
 // app.use('/api/v1/items', itemRouter);
 

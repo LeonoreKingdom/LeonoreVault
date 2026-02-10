@@ -104,7 +104,7 @@ Set up the Express server entry point, error handling middleware, logger (pino),
 **Priority:** P0
 **Estimate:** 4h
 **Dependencies:** TASK-004
-**Status:** ⬜
+**Status:** ✅
 
 **Description:**
 Implement the backend endpoint `POST /auth/google/callback` to exchange code for session and `GET /auth/me`. Integrate Supabase Auth on the backend.
