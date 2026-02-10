@@ -57,7 +57,8 @@ LeonoreVault is a comprehensive household inventory and management system design
 - [x] **TASK-003:** Database Setup & Migrations ✅
 - [x] **TASK-004:** Backend Boilerplate & Env Config ✅
 - [x] **TASK-005:** Google OAuth Implementation ✅
-- [ ] **TASK-006:** Frontend Auth & App Shell ← NEXT
+- [x] **TASK-006:** Frontend Auth & App Shell ✅
+- [ ] **TASK-007:** Household & Invite API ← NEXT
 
 ## Key Decisions Made
 

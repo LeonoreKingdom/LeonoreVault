@@ -122,7 +122,7 @@ Implement the backend endpoint `POST /auth/google/callback` to exchange code for
 **Priority:** P1
 **Estimate:** 4h
 **Dependencies:** TASK-005
-**Status:** ⬜
+**Status:** ✅
 
 **Description:**
 Implement the Authentication Store (Zustand), Login page with Google button, and the main App Shell (Layout) with navigation guards.
