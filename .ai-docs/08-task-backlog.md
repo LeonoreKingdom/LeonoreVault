@@ -67,7 +67,7 @@ Implement shared TypeScript interfaces and Zod schemas in `packages/shared`. Thi
 **Priority:** P0
 **Estimate:** 4h
 **Dependencies:** TASK-001
-**Status:** ⬜
+**Status:** ✅
 
 **Description:**
 Initialize Supabase local development environment. Create SQL migrations for all 8 tables (`users`, `items`, etc.), including triggers, indexes, and RLS policies as per Schema doc.
