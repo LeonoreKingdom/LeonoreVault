@@ -56,7 +56,10 @@ export default function DashboardPage() {
               />
             </Link>
 
-            <button className="border-border hover:border-accent/50 bg-surface group flex items-center justify-between rounded-2xl border border-dashed p-5 transition-all duration-300 hover:shadow-md">
+            <Link
+              href="/items/new"
+              className="border-border hover:border-accent/50 bg-surface group flex items-center justify-between rounded-2xl border border-dashed p-5 transition-all duration-300 hover:shadow-md"
+            >
               <div className="flex items-center gap-4">
                 <div className="bg-accent/10 text-accent flex h-11 w-11 items-center justify-center rounded-xl transition-transform group-hover:scale-110">
                   <Plus size={22} />
@@ -70,7 +73,7 @@ export default function DashboardPage() {
                 size={18}
                 className="text-muted group-hover:text-accent transition-all group-hover:translate-x-1"
               />
-            </button>
+            </Link>
           </div>
         </>
       ) : (
