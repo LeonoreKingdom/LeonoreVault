@@ -140,7 +140,7 @@ Implement the Authentication Store (Zustand), Login page with Google button, and
 **Priority:** P1
 **Estimate:** 4h
 **Dependencies:** TASK-006
-**Status:** ⬜
+**Status:** ✅
 **Description:**
 Implement CRUD for Households and Member management (Join, Invite, Leave).
 
@@ -161,7 +161,7 @@ Implement CRUD for Households and Member management (Join, Invite, Leave).
 **Priority:** P1
 **Estimate:** 4h
 **Dependencies:** TASK-003
-**Status:** ⬜
+**Status:** ✅
 
 **Description:**
 Implement hierarchical APIs for Categories and Locations (`GET` tree, `POST`, `PATCH`, `DELETE`).
@@ -179,7 +179,7 @@ Implement hierarchical APIs for Categories and Locations (`GET` tree, `POST`, `P
 **Priority:** P0
 **Estimate:** 6h
 **Dependencies:** TASK-008
-**Status:** ⬜
+**Status:** ✅
 
 **Description:**
 Implement the core Inventory Item endpoints: List (paginated/filter), Get Detail, Create, Update, Soft-Delete.

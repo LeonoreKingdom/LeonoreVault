@@ -7,6 +7,10 @@ import { requestLogger } from './middleware/requestLogger.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { healthRouter } from './routes/health.js';
 import { authRouter } from './modules/auth/auth.routes.js';
+import { householdRouter } from './modules/household/household.routes.js';
+import { categoryRouter } from './modules/category/category.routes.js';
+import { locationRouter } from './modules/location/location.routes.js';
+import { itemRouter } from './modules/item/item.routes.js';
 
 const app: Express = express();
 
@@ -25,10 +29,10 @@ app.use(requestLogger);
 // ─── Routes ─────────────────────────────────────────────────
 app.use('/health', healthRouter);
 app.use('/api/auth', authRouter);
-
-// Placeholder: Module routes will be registered here in later tasks
-// app.use('/api/v1/households', householdRouter);
-// app.use('/api/v1/items', itemRouter);
+app.use('/api/households', householdRouter);
+app.use('/api/households/:householdId/categories', categoryRouter);
+app.use('/api/households/:householdId/locations', locationRouter);
+app.use('/api/households/:householdId/items', itemRouter);
 
 // ─── Error Handling (must be last) ──────────────────────────
 app.use(errorHandler);
