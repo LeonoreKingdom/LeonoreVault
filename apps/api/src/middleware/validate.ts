@@ -2,9 +2,21 @@ import type { Request, Response, NextFunction } from 'express';
 import { type ZodSchema, ZodError } from 'zod';
 import { AppError } from './errorHandler.js';
 
+// Extend Express Request to hold validated data
+declare global {
+  namespace Express {
+    interface Request {
+      validated?: Record<string, unknown>;
+    }
+  }
+}
+
 /**
  * Express middleware factory that validates request data against a Zod schema.
  * Supports validating body, query, or params.
+ *
+ * - For 'body': replaces req.body with parsed data (writable in Express 5).
+ * - For 'query'/'params': stores parsed data on req.validated (read-only in Express 5).
  *
  * @example
  * ```ts
@@ -16,15 +28,12 @@ export function validate(schema: ZodSchema, source: 'body' | 'query' | 'params' 
   return (req: Request, _res: Response, next: NextFunction): void => {
     try {
       const parsed = schema.parse(req[source]);
-      // Replace raw data with parsed + transformed data
       if (source === 'body') {
         req.body = parsed;
-      } else if (source === 'query') {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (req as any).query = parsed;
       } else {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (req as any).params = parsed;
+        // Express 5: req.query and req.params are read-only getters
+        // Store parsed + transformed data on req.validated
+        req.validated = parsed;
       }
       next();
     } catch (err) {

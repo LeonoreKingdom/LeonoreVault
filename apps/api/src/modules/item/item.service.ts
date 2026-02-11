@@ -182,18 +182,19 @@ export async function updateItemStatus(
     .single();
 
   if (fetchError || !current) {
+    logger.error({ fetchError, itemId, householdId }, 'Item not found for status update');
     throw new AppError(404, 'Item not found', 'NOT_FOUND');
   }
 
   const currentStatus = current.status as ItemStatus;
-  const newStatus = payload.status;
+  const newStatus = payload.status as ItemStatus;
 
   // Validate transition
   const allowed = STATUS_TRANSITIONS[currentStatus];
-  if (!allowed.includes(newStatus)) {
+  if (!allowed || !allowed.includes(newStatus)) {
     throw new AppError(
       400,
-      `Cannot transition from '${currentStatus}' to '${newStatus}'. Allowed: ${allowed.join(', ')}`,
+      `Cannot transition from '${currentStatus}' to '${newStatus}'. Allowed: ${(allowed || []).join(', ')}`,
       'INVALID_TRANSITION',
     );
   }
@@ -209,6 +210,8 @@ export async function updateItemStatus(
     updateData.borrow_due_date = null;
   }
 
+  logger.debug({ itemId, householdId, currentStatus, newStatus, updateData }, 'Updating item status');
+
   const { data, error } = await supabaseAdmin
     .from('items')
     .update(updateData)
@@ -218,7 +221,7 @@ export async function updateItemStatus(
     .single();
 
   if (error) {
-    logger.error({ error: error.message }, 'Failed to update item status');
+    logger.error({ error: error.message, code: error.code, details: error.details, hint: error.hint }, 'Failed to update item status');
     throw new AppError(500, 'Failed to update item status', 'INTERNAL_ERROR');
   }
 

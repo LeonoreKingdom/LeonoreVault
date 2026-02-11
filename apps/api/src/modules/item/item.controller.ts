@@ -15,7 +15,7 @@ const param = (req: Request, name: string) => {
 /** GET /api/households/:householdId/items */
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {
-    const result = await svc.listItems(param(req, 'householdId'), req.query as unknown as ItemListQuerySchema);
+    const result = await svc.listItems(param(req, 'householdId'), (req.validated ?? req.query) as unknown as ItemListQuerySchema);
     res.json({ success: true, data: result });
   } catch (err) { next(err); }
 }
