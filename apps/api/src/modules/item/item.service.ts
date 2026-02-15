@@ -75,7 +75,7 @@ export async function listItems(householdId: string, query: ItemListQuerySchema)
 }
 
 /**
- * Get a single item by ID.
+ * Get a single item by ID, including its attachments.
  */
 export async function getItem(itemId: string, householdId: string) {
   const { data, error } = await supabaseAdmin
@@ -90,7 +90,27 @@ export async function getItem(itemId: string, householdId: string) {
     throw new AppError(404, 'Item not found', 'NOT_FOUND');
   }
 
-  return { item: mapItem(data) };
+  // Fetch attachments for this item
+  const { data: attachments } = await supabaseAdmin
+    .from('attachments')
+    .select('*')
+    .eq('item_id', itemId)
+    .order('created_at', { ascending: false });
+
+  return {
+    item: mapItem(data),
+    attachments: (attachments || []).map((a: Record<string, unknown>) => ({
+      id: a.id,
+      itemId: a.item_id,
+      driveFileId: a.drive_file_id,
+      fileName: a.file_name,
+      mimeType: a.mime_type,
+      thumbnailUrl: a.thumbnail_url ?? null,
+      webViewLink: a.web_view_link ?? null,
+      createdBy: a.created_by,
+      createdAt: a.created_at,
+    })),
+  };
 }
 
 /**

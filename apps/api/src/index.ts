@@ -11,6 +11,8 @@ import { householdRouter } from './modules/household/household.routes.js';
 import { categoryRouter } from './modules/category/category.routes.js';
 import { locationRouter } from './modules/location/location.routes.js';
 import { itemRouter } from './modules/item/item.routes.js';
+import { attachmentRouter } from './modules/attachment/attachment.routes.js';
+import { qrRouter } from './modules/qr/qr.routes.js';
 
 const app: Express = express();
 
@@ -33,6 +35,8 @@ app.use('/api/households', householdRouter);
 app.use('/api/households/:householdId/categories', categoryRouter);
 app.use('/api/households/:householdId/locations', locationRouter);
 app.use('/api/households/:householdId/items', itemRouter);
+app.use('/api/households/:householdId/items/:itemId/attachments', attachmentRouter);
+app.use('/api/households/:householdId/items', qrRouter);
 
 // ─── Error Handling (must be last) ──────────────────────────
 app.use(errorHandler);

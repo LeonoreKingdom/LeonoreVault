@@ -63,3 +63,10 @@ export {
   type GoogleCallbackSchema,
   type RefreshTokenSchema,
 } from './auth.schema.js';
+
+export {
+  attachmentSchema,
+  linkAttachmentSchema,
+  type AttachmentSchema,
+  type LinkAttachmentSchema,
+} from './attachment.schema.js';

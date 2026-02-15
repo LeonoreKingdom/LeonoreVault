@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useAuthStore } from '@/stores/auth';
 import { useItemsStore } from '@/stores/items';
 import StatusBadge from '@/components/StatusBadge';
+import AttachmentPanel from '@/components/items/AttachmentPanel';
 import { STATUS_TRANSITIONS, STATUS_CONFIG, type ItemStatus } from '@leonorevault/shared';
 import {
   ArrowLeft,
@@ -309,6 +310,11 @@ export default function ItemDetailPage() {
             ))}
           </div>
         </div>
+      )}
+
+      {/* Attachments */}
+      {householdId && (
+        <AttachmentPanel householdId={householdId} itemId={item.id} editable={isEditable} />
       )}
     </div>
   );

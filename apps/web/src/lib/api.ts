@@ -67,3 +67,49 @@ export function apiPatch<T>(path: string, body?: unknown) {
 export function apiDelete<T>(path: string) {
   return request<T>('DELETE', path);
 }
+
+/**
+ * Upload files via multipart/form-data with progress tracking.
+ * Uses XMLHttpRequest because fetch doesn't support upload progress.
+ */
+export async function apiUpload<T>(
+  path: string,
+  formData: FormData,
+  onProgress?: (percent: number) => void,
+): Promise<T> {
+  const token = await getToken();
+  const url = `${API_URL}${path}`;
+
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+
+    if (token) {
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    }
+
+    xhr.upload.addEventListener('progress', (e) => {
+      if (e.lengthComputable && onProgress) {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    });
+
+    xhr.addEventListener('load', () => {
+      try {
+        const json = JSON.parse(xhr.responseText);
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(json.data as T);
+        } else {
+          reject(new Error(json?.error?.message || `Upload failed (${xhr.status})`));
+        }
+      } catch {
+        reject(new Error('Failed to parse upload response'));
+      }
+    });
+
+    xhr.addEventListener('error', () => reject(new Error('Upload network error')));
+    xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
+
+    xhr.send(formData);
+  });
+}

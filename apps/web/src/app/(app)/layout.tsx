@@ -3,6 +3,7 @@
 import AuthGuard from '@/components/AuthGuard';
 import Sidebar from '@/components/Sidebar';
 import BottomNav from '@/components/BottomNav';
+import ToastContainer from '@/components/Toast';
 
 /**
  * App Shell layout for all authenticated pages.
@@ -24,6 +25,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         {/* Mobile Bottom Nav */}
         <BottomNav />
       </div>
+
+      {/* Toast Notifications */}
+      <ToastContainer />
     </AuthGuard>
   );
 }

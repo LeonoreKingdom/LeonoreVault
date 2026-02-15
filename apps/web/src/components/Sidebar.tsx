@@ -3,9 +3,9 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth';
+import ThemeToggle from './ThemeToggle';
 import {
   Package,
-  LayoutGrid,
   MapPin,
   Tag,
   Settings,
@@ -94,6 +94,9 @@ export default function Sidebar() {
           <LogOut size={20} strokeWidth={1.8} />
           {!collapsed && <span>Sign Out</span>}
         </button>
+
+        {/* Theme Toggle */}
+        <ThemeToggle collapsed={collapsed} />
 
         {/* Collapse Toggle */}
         <button

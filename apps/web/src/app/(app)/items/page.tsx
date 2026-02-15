@@ -5,8 +5,9 @@ import { useAuthStore } from '@/stores/auth';
 import { useItemsStore } from '@/stores/items';
 import ItemCard from '@/components/items/ItemCard';
 import ItemFiltersBar from '@/components/items/ItemFilters';
+import { SkeletonCard } from '@/components/Skeleton';
 import Link from 'next/link';
-import { Plus, Package, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { Plus, Package, ChevronLeft, ChevronRight } from 'lucide-react';
 
 /**
  * Item List page with search, filters, and pagination.
@@ -74,10 +75,12 @@ export default function ItemsPage() {
         <div className="bg-danger/10 text-danger rounded-xl px-4 py-3 text-sm">{error}</div>
       )}
 
-      {/* Loading */}
+      {/* Loading Skeletons */}
       {loading && (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 size={32} className="text-primary animate-spin" />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <SkeletonCard key={i} />
+          ))}
         </div>
       )}
 
