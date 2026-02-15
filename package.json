@@ -19,6 +19,9 @@
     "format": "prettier --write \"**/*.{ts,tsx,json,md,css}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,json,md,css}\"",
     "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "test:shared": "pnpm --filter @leonorevault/shared test",
+    "test:api": "pnpm --filter @leonorevault/api test",
     "clean": "pnpm -r exec -- rm -rf dist .next node_modules",
     "prepare": "husky"
   },
