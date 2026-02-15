@@ -2,6 +2,7 @@
 
 import { create } from 'zustand';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
+import { db, isFresh, markSynced, type DbItem } from '@/lib/db';
 import type {
   CreateItemSchema,
   UpdateItemSchema,
@@ -75,6 +76,55 @@ const DEFAULT_FILTERS: ItemFilters = {
   limit: 20,
 };
 
+// ─── Helpers ────────────────────────────────────────────────
+
+/** Apply client-side filtering/sorting to cached items. */
+function applyCacheFilters(items: DbItem[], filters: ItemFilters): { items: Item[]; total: number } {
+  let result = items.filter((i) => !i.deletedAt);
+
+  // Search
+  if (filters.search) {
+    const q = filters.search.toLowerCase();
+    result = result.filter(
+      (i) =>
+        i.name.toLowerCase().includes(q) ||
+        (i.description && i.description.toLowerCase().includes(q)),
+    );
+  }
+
+  // Status
+  if (filters.status) {
+    result = result.filter((i) => i.status === filters.status);
+  }
+
+  // Category
+  if (filters.category_id) {
+    result = result.filter((i) => i.categoryId === filters.category_id);
+  }
+
+  // Location
+  if (filters.location_id) {
+    result = result.filter((i) => i.locationId === filters.location_id);
+  }
+
+  const total = result.length;
+
+  // Sort
+  const sortKey = filters.sort === 'updated_at' ? 'updatedAt' : filters.sort === 'created_at' ? 'createdAt' : 'name';
+  const dir = filters.order === 'asc' ? 1 : -1;
+  result.sort((a, b) => {
+    const av = String(a[sortKey as keyof DbItem] ?? '');
+    const bv = String(b[sortKey as keyof DbItem] ?? '');
+    return av < bv ? -dir : av > bv ? dir : 0;
+  });
+
+  // Paginate
+  const start = (filters.page - 1) * filters.limit;
+  const page = result.slice(start, start + filters.limit) as Item[];
+
+  return { items: page, total };
+}
+
 // ─── Store ──────────────────────────────────────────────────
 
 export const useItemsStore = create<ItemsState>((set, get) => ({
@@ -92,9 +142,34 @@ export const useItemsStore = create<ItemsState>((set, get) => ({
   },
 
   fetchItems: async (householdId) => {
+    const { filters } = get();
+
+    // ── Phase 1: Serve from Dexie cache instantly ────────
+    try {
+      const cached = await db.items.where('householdId').equals(householdId).toArray();
+      if (cached.length > 0) {
+        const { items, total } = applyCacheFilters(cached, filters);
+        set({
+          items,
+          pagination: {
+            page: filters.page,
+            limit: filters.limit,
+            total,
+            totalPages: Math.ceil(total / filters.limit),
+          },
+          loading: false,
+        });
+      }
+    } catch {
+      // IndexedDB unavailable — continue to API
+    }
+
+    // ── Phase 2: Background fetch from API ──────────────
+    const fresh = await isFresh('items', householdId).catch(() => false);
+    if (fresh) return; // Cache is still fresh, skip API call
+
     set({ loading: true, error: null });
     try {
-      const { filters } = get();
       const params: Record<string, string> = {
         page: String(filters.page),
         limit: String(filters.limit),
@@ -110,19 +185,47 @@ export const useItemsStore = create<ItemsState>((set, get) => ({
         `/api/households/${householdId}/items`,
         params,
       );
+
+      // Update Zustand
       set({ items: data.items, pagination: data.pagination, loading: false });
+
+      // Update Dexie cache
+      try {
+        await db.items.bulkPut(data.items as unknown as DbItem[]);
+        await markSynced('items', householdId);
+      } catch {
+        // Dexie write failure is non-fatal
+      }
     } catch (err) {
       set({ error: (err as Error).message, loading: false });
     }
   },
 
   fetchItem: async (householdId, itemId) => {
+    // ── Phase 1: Try Dexie cache ────────────────────────
+    try {
+      const cached = await db.items.get(itemId);
+      if (cached && cached.householdId === householdId) {
+        set({ selectedItem: cached as unknown as Item, loading: false });
+      }
+    } catch {
+      // Continue to API
+    }
+
+    // ── Phase 2: Fetch from API ─────────────────────────
     set({ loading: true, error: null });
     try {
       const data = await apiGet<{ item: Item }>(
         `/api/households/${householdId}/items/${itemId}`,
       );
       set({ selectedItem: data.item, loading: false });
+
+      // Update Dexie
+      try {
+        await db.items.put(data.item as unknown as DbItem);
+      } catch {
+        // Non-fatal
+      }
     } catch (err) {
       set({ error: (err as Error).message, loading: false });
     }
@@ -133,7 +236,7 @@ export const useItemsStore = create<ItemsState>((set, get) => ({
       `/api/households/${householdId}/items`,
       payload,
     );
-    // Prepend to items list
+    // Update Zustand
     set((state) => ({
       items: [data.item, ...state.items],
       pagination: {
@@ -141,6 +244,12 @@ export const useItemsStore = create<ItemsState>((set, get) => ({
         total: state.pagination.total + 1,
       },
     }));
+    // Update Dexie
+    try {
+      await db.items.put(data.item as unknown as DbItem);
+    } catch {
+      // Non-fatal
+    }
     return data.item;
   },
 
@@ -149,11 +258,15 @@ export const useItemsStore = create<ItemsState>((set, get) => ({
       `/api/households/${householdId}/items/${itemId}`,
       payload,
     );
-    // Update in list and selected
     set((state) => ({
       items: state.items.map((i) => (i.id === itemId ? data.item : i)),
       selectedItem: state.selectedItem?.id === itemId ? data.item : state.selectedItem,
     }));
+    try {
+      await db.items.put(data.item as unknown as DbItem);
+    } catch {
+      // Non-fatal
+    }
     return data.item;
   },
 
@@ -166,6 +279,11 @@ export const useItemsStore = create<ItemsState>((set, get) => ({
       items: state.items.map((i) => (i.id === itemId ? data.item : i)),
       selectedItem: state.selectedItem?.id === itemId ? data.item : state.selectedItem,
     }));
+    try {
+      await db.items.put(data.item as unknown as DbItem);
+    } catch {
+      // Non-fatal
+    }
     return data.item;
   },
 
@@ -176,6 +294,11 @@ export const useItemsStore = create<ItemsState>((set, get) => ({
       selectedItem: state.selectedItem?.id === itemId ? null : state.selectedItem,
       pagination: { ...state.pagination, total: state.pagination.total - 1 },
     }));
+    try {
+      await db.items.delete(itemId);
+    } catch {
+      // Non-fatal
+    }
   },
 
   clearSelected: () => set({ selectedItem: null }),
