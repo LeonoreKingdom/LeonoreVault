@@ -13,6 +13,7 @@ import { locationRouter } from './modules/location/location.routes.js';
 import { itemRouter } from './modules/item/item.routes.js';
 import { attachmentRouter } from './modules/attachment/attachment.routes.js';
 import { qrRouter } from './modules/qr/qr.routes.js';
+import { syncRouter } from './modules/sync/sync.routes.js';
 
 const app: Express = express();
 
@@ -37,6 +38,7 @@ app.use('/api/households/:householdId/locations', locationRouter);
 app.use('/api/households/:householdId/items', itemRouter);
 app.use('/api/households/:householdId/items/:itemId/attachments', attachmentRouter);
 app.use('/api/households/:householdId/items', qrRouter);
+app.use('/api/sync', syncRouter);
 
 // ─── Error Handling (must be last) ──────────────────────────
 app.use(errorHandler);

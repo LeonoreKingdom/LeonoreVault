@@ -232,11 +232,50 @@ export const useItemsStore = create<ItemsState>((set, get) => ({
   },
 
   createItem: async (householdId, payload) => {
+    // ── Offline: queue mutation ──────────────────────────
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      const id = crypto.randomUUID();
+      const now = new Date().toISOString();
+      const optimistic: Item = {
+        id,
+        householdId,
+        name: payload.name,
+        description: payload.description ?? null,
+        categoryId: payload.category_id ?? null,
+        locationId: payload.location_id ?? null,
+        quantity: payload.quantity ?? 1,
+        tags: payload.tags ?? [],
+        status: (payload.status as Item['status']) ?? 'stored',
+        createdBy: '',
+        borrowedBy: null,
+        borrowDueDate: null,
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+      };
+      set((state) => ({
+        items: [optimistic, ...state.items],
+        pagination: { ...state.pagination, total: state.pagination.total + 1 },
+      }));
+      try {
+        await db.items.put(optimistic as unknown as DbItem);
+        await db.syncQueue.add({
+          type: 'create',
+          table: 'items',
+          entityId: id,
+          payload: payload as unknown as Record<string, unknown>,
+          householdId,
+          createdAt: now,
+        });
+      } catch { /* Non-fatal */ }
+      return optimistic;
+    }
+
+    // ── Online: normal API call ──────────────────────────
     const data = await apiPost<{ item: Item }>(
       `/api/households/${householdId}/items`,
       payload,
     );
-    // Update Zustand
     set((state) => ({
       items: [data.item, ...state.items],
       pagination: {
@@ -244,16 +283,44 @@ export const useItemsStore = create<ItemsState>((set, get) => ({
         total: state.pagination.total + 1,
       },
     }));
-    // Update Dexie
     try {
       await db.items.put(data.item as unknown as DbItem);
-    } catch {
-      // Non-fatal
-    }
+    } catch { /* Non-fatal */ }
     return data.item;
   },
 
   updateItem: async (householdId, itemId, payload) => {
+    // ── Offline: queue mutation ──────────────────────────
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      const now = new Date().toISOString();
+      set((state) => {
+        const updated = state.items.map((i) =>
+          i.id === itemId ? { ...i, ...payload, updatedAt: now } as Item : i,
+        );
+        return {
+          items: updated,
+          selectedItem: state.selectedItem?.id === itemId
+            ? { ...state.selectedItem, ...payload, updatedAt: now } as Item
+            : state.selectedItem,
+        };
+      });
+      try {
+        const existing = await db.items.get(itemId);
+        if (existing) await db.items.put({ ...existing, ...payload, updatedAt: now } as DbItem);
+        await db.syncQueue.add({
+          type: 'update',
+          table: 'items',
+          entityId: itemId,
+          payload: payload as unknown as Record<string, unknown>,
+          householdId,
+          createdAt: now,
+        });
+      } catch { /* Non-fatal */ }
+      const item = get().items.find((i) => i.id === itemId);
+      return item!;
+    }
+
+    // ── Online ──────────────────────────────────────────
     const data = await apiPatch<{ item: Item }>(
       `/api/households/${householdId}/items/${itemId}`,
       payload,
@@ -264,13 +331,42 @@ export const useItemsStore = create<ItemsState>((set, get) => ({
     }));
     try {
       await db.items.put(data.item as unknown as DbItem);
-    } catch {
-      // Non-fatal
-    }
+    } catch { /* Non-fatal */ }
     return data.item;
   },
 
   updateStatus: async (householdId, itemId, payload) => {
+    // ── Offline: queue mutation ──────────────────────────
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      const now = new Date().toISOString();
+      set((state) => {
+        const updated = state.items.map((i) =>
+          i.id === itemId ? { ...i, status: payload.status as Item['status'], updatedAt: now } : i,
+        );
+        return {
+          items: updated,
+          selectedItem: state.selectedItem?.id === itemId
+            ? { ...state.selectedItem, status: payload.status as Item['status'], updatedAt: now }
+            : state.selectedItem,
+        };
+      });
+      try {
+        const existing = await db.items.get(itemId);
+        if (existing) await db.items.put({ ...existing, status: payload.status, updatedAt: now } as DbItem);
+        await db.syncQueue.add({
+          type: 'update',
+          table: 'items',
+          entityId: itemId,
+          payload: payload as unknown as Record<string, unknown>,
+          householdId,
+          createdAt: now,
+        });
+      } catch { /* Non-fatal */ }
+      const item = get().items.find((i) => i.id === itemId);
+      return item!;
+    }
+
+    // ── Online ──────────────────────────────────────────
     const data = await apiPatch<{ item: Item }>(
       `/api/households/${householdId}/items/${itemId}/status`,
       payload,
@@ -281,13 +377,33 @@ export const useItemsStore = create<ItemsState>((set, get) => ({
     }));
     try {
       await db.items.put(data.item as unknown as DbItem);
-    } catch {
-      // Non-fatal
-    }
+    } catch { /* Non-fatal */ }
     return data.item;
   },
 
   deleteItem: async (householdId, itemId) => {
+    // ── Offline: queue mutation ──────────────────────────
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      set((state) => ({
+        items: state.items.filter((i) => i.id !== itemId),
+        selectedItem: state.selectedItem?.id === itemId ? null : state.selectedItem,
+        pagination: { ...state.pagination, total: state.pagination.total - 1 },
+      }));
+      try {
+        await db.items.delete(itemId);
+        await db.syncQueue.add({
+          type: 'delete',
+          table: 'items',
+          entityId: itemId,
+          payload: {},
+          householdId,
+          createdAt: new Date().toISOString(),
+        });
+      } catch { /* Non-fatal */ }
+      return;
+    }
+
+    // ── Online ──────────────────────────────────────────
     await apiDelete(`/api/households/${householdId}/items/${itemId}`);
     set((state) => ({
       items: state.items.filter((i) => i.id !== itemId),
@@ -296,9 +412,7 @@ export const useItemsStore = create<ItemsState>((set, get) => ({
     }));
     try {
       await db.items.delete(itemId);
-    } catch {
-      // Non-fatal
-    }
+    } catch { /* Non-fatal */ }
   },
 
   clearSelected: () => set({ selectedItem: null }),

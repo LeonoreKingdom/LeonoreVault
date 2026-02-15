@@ -44,6 +44,16 @@ export interface DbMeta {
   syncedAt: number;     // Date.now() timestamp
 }
 
+export interface DbSyncQueueItem {
+  id?: number;          // Auto-incremented
+  type: 'create' | 'update' | 'delete';
+  table: string;        // e.g. "items"
+  entityId: string;     // UUID of the entity
+  payload: Record<string, unknown>;
+  householdId: string;
+  createdAt: string;    // ISO timestamp
+}
+
 // ─── Dexie Instance ─────────────────────────────────────────
 
 class VaultDB extends Dexie {
@@ -51,6 +61,7 @@ class VaultDB extends Dexie {
   categories!: Table<DbCategory, string>;
   locations!: Table<DbLocation, string>;
   _meta!: Table<DbMeta, string>;
+  syncQueue!: Table<DbSyncQueueItem, number>;
 
   constructor() {
     super('leonorevault');
@@ -60,6 +71,14 @@ class VaultDB extends Dexie {
       categories: 'id, householdId',
       locations: 'id, householdId, parentId',
       _meta: 'key',
+    });
+
+    this.version(2).stores({
+      items: 'id, householdId, categoryId, locationId, status, updatedAt',
+      categories: 'id, householdId',
+      locations: 'id, householdId, parentId',
+      _meta: 'key',
+      syncQueue: '++id, householdId, table, entityId',
     });
   }
 }
