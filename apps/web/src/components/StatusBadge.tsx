@@ -1,6 +1,7 @@
 'use client';
 
-import { STATUS_CONFIG, type ItemStatus } from '@leonorevault/shared';
+import { STATUS_CONFIG, ITEM_STATUSES } from '@leonorevault/shared';
+type ItemStatus = (typeof ITEM_STATUSES)[number];
 
 const colorMap: Record<string, string> = {
   green: 'bg-success/15 text-success',

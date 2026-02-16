@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useCallback } from 'react';
 import { Search, SlidersHorizontal, X } from 'lucide-react';
-import { ITEM_STATUSES, STATUS_CONFIG, type ItemStatus } from '@leonorevault/shared';
+import { ITEM_STATUSES, STATUS_CONFIG } from '@leonorevault/shared';
+type ItemStatus = (typeof ITEM_STATUSES)[number];
 import type { ItemFilters } from '@/stores/items';
 
 interface ItemFiltersBarProps {

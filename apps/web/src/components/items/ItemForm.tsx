@@ -4,7 +4,8 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useItemsStore, type Item } from '@/stores/items';
 import { useAuthStore } from '@/stores/auth';
-import { ITEM_STATUSES, STATUS_CONFIG, type ItemStatus } from '@leonorevault/shared';
+import { ITEM_STATUSES, STATUS_CONFIG } from '@leonorevault/shared';
+type ItemStatus = (typeof ITEM_STATUSES)[number];
 import { Loader2, Save, ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 

@@ -7,7 +7,8 @@ import { useAuthStore } from '@/stores/auth';
 import { useItemsStore } from '@/stores/items';
 import StatusBadge from '@/components/StatusBadge';
 import AttachmentPanel from '@/components/items/AttachmentPanel';
-import { STATUS_TRANSITIONS, STATUS_CONFIG, type ItemStatus } from '@leonorevault/shared';
+import { STATUS_TRANSITIONS, STATUS_CONFIG, ITEM_STATUSES } from '@leonorevault/shared';
+type ItemStatus = (typeof ITEM_STATUSES)[number];
 import {
   ArrowLeft,
   Edit3,
