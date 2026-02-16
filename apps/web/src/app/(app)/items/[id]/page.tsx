@@ -112,7 +112,8 @@ export default function ItemDetailPage() {
     );
   }
 
-  const allowedTransitions = STATUS_TRANSITIONS[item.status as ItemStatus] || [];
+  const allowedTransitions =
+    STATUS_TRANSITIONS[item.status as keyof typeof STATUS_TRANSITIONS] || [];
   const isEditable = membership?.role === 'admin' || membership?.role === 'member';
 
   return (
