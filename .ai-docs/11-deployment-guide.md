@@ -77,6 +77,23 @@ From **Settings → Database → Connection string → URI**:
 
 ---
 
+## Step 2.5: Google Drive Service Account (For Attachments)
+
+1. Go to **Google Cloud Console** → **APIs & Services → Enable APIs and Services**
+2. Search for **Google Drive API** and click **Enable**
+3. Go to **IAM & Admin → Service Accounts**
+4. Click **Create Service Account**
+   - Name: `drive-upload-bot`
+   - Grant role: **Editor** (or specific drive permissions)
+   - Click **Done**
+5. Click on the newly created service account (email looks like `drive-upload-bot@<project>.iam.gserviceaccount.com`)
+6. Go to **Keys** tab → **Add Key** → **Create new key** → **JSON**
+7. A JSON file will download. Open it and copy:
+   - `client_email` → `GOOGLE_SERVICE_ACCOUNT_EMAIL`
+   - `private_key` → `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY`
+
+---
+
 ## Step 3: Deploy API to Render
 
 ### 3.1 Create Web Service
@@ -112,6 +129,8 @@ DATABASE_URL=postgresql://postgres:<password>@db.<ref>.supabase.co:5432/postgres
 GOOGLE_CLIENT_ID=<your-client-id>.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=GOCSPX-...
 GOOGLE_REDIRECT_URI=https://your-app.vercel.app/auth/callback
+GOOGLE_SERVICE_ACCOUNT_EMAIL=<client_email from JSON>
+GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n..."
 ENCRYPTION_KEY=<generate-a-random-64-char-hex-string>
 ```
 
@@ -209,19 +228,21 @@ https://your-app.vercel.app
 
 ### Render (API)
 
-| Variable                        | Source                     |
-| ------------------------------- | -------------------------- |
-| `NODE_ENV`                      | `production`               |
-| `PORT`                          | `4000`                     |
-| `CORS_ORIGIN`                   | Your Vercel URL            |
-| `NEXT_PUBLIC_SUPABASE_URL`      | Supabase Dashboard         |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase Dashboard         |
-| `SUPABASE_SERVICE_ROLE_KEY`     | Supabase Dashboard         |
-| `DATABASE_URL`                  | Supabase Dashboard         |
-| `GOOGLE_CLIENT_ID`              | Google Cloud Console       |
-| `GOOGLE_CLIENT_SECRET`          | Google Cloud Console       |
-| `GOOGLE_REDIRECT_URI`           | Your Vercel callback URL   |
-| `ENCRYPTION_KEY`                | Self-generated (32+ chars) |
+| Variable                             | Source                     |
+| ------------------------------------ | -------------------------- |
+| `NODE_ENV`                           | `production`               |
+| `PORT`                               | `4000`                     |
+| `CORS_ORIGIN`                        | Your Vercel URL            |
+| `NEXT_PUBLIC_SUPABASE_URL`           | Supabase Dashboard         |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`      | Supabase Dashboard         |
+| `SUPABASE_SERVICE_ROLE_KEY`          | Supabase Dashboard         |
+| `DATABASE_URL`                       | Supabase Dashboard         |
+| `GOOGLE_CLIENT_ID`                   | Google Cloud Console       |
+| `GOOGLE_CLIENT_SECRET`               | Google Cloud Console       |
+| `GOOGLE_REDIRECT_URI`                | Your Vercel callback URL   |
+| `GOOGLE_SERVICE_ACCOUNT_EMAIL`       | Google Cloud Console (IAM) |
+| `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` | Google Cloud Console (IAM) |
+| `ENCRYPTION_KEY`                     | Self-generated (32+ chars) |
 
 ### Vercel (Frontend)
 

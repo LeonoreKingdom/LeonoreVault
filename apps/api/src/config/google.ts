@@ -22,15 +22,35 @@ export function getDriveClient(): drive_v3.Drive {
       hasEmail: !!email,
       hasKey: !!key,
     }, 'Google Drive credentials missing');
-    // Ensure credentials are set in Render environment variables
     throw new Error('Google Drive service account credentials are not configured');
   }
 
   logger.info({ email, keyLength: key?.length }, 'Initializing Google Drive client');
 
+  // Handle potential formatting issues with the key from env vars
+  let privateKey = key;
+  
+  // 1. Remove wrapping quotes if present (common copy-paste error)
+  if (privateKey.startsWith('"') && privateKey.endsWith('"')) {
+    privateKey = privateKey.slice(1, -1);
+  }
+  
+  // 2. Handle escaped newlines (literal "\n" -> actual newline)
+  privateKey = privateKey.replace(/\\n/g, '\n');
+
+  // Debug log (redacted) to check format
+  const lines = privateKey.split('\n');
+  logger.info({ 
+    lineCount: lines.length, 
+    startsWithHeader: privateKey.trim().startsWith('-----BEGIN PRIVATE KEY-----'),
+    endsWithFooter: privateKey.trim().endsWith('-----END PRIVATE KEY-----'),
+    firstLine: lines[0],
+    lastLine: lines[lines.length - 1]
+  }, 'Private Key format check');
+
   const auth = new google.auth.JWT({
     email,
-    key: key.replace(/\\n/g, '\n'), // Handle escaped newlines in env
+    key: privateKey,
     scopes: ['https://www.googleapis.com/auth/drive.file'],
   });
 
