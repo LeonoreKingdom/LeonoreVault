@@ -84,11 +84,18 @@ export async function getOrCreateHouseholdFolder(householdId: string): Promise<s
 
   // Create a new folder in Google Drive
   const drive = getDriveClient();
+  const folderMetadata: drive_v3.Schema$File = {
+    name: `LeonoreVault - ${household.name}`,
+    mimeType: 'application/vnd.google-apps.folder',
+  };
+
+  // If a root folder is configured (shared from personal drive), create inside it
+  if (env.GOOGLE_DRIVE_ROOT_FOLDER_ID) {
+    folderMetadata.parents = [env.GOOGLE_DRIVE_ROOT_FOLDER_ID];
+  }
+
   const folderResponse = await drive.files.create({
-    requestBody: {
-      name: `LeonoreVault - ${household.name}`,
-      mimeType: 'application/vnd.google-apps.folder',
-    },
+    requestBody: folderMetadata,
     fields: 'id',
   });
 

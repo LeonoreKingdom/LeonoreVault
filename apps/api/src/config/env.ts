@@ -26,6 +26,7 @@ const envSchema = z.object({
   // ─── Google Drive (optional for MVP) ────────────────────
   GOOGLE_SERVICE_ACCOUNT_EMAIL: z.string().optional(),
   GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: z.string().optional(),
+  GOOGLE_DRIVE_ROOT_FOLDER_ID: z.string().optional(),
 
   // ─── Encryption ─────────────────────────────────────────
   ENCRYPTION_KEY: z.string().min(32, 'Must be at least 32 characters'),
