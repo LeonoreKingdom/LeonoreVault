@@ -18,10 +18,11 @@ export function getDriveClient(): drive_v3.Drive {
   const key = env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
 
   if (!email || !key) {
-    logger.error('Google Drive credentials missing', {
+    logger.error({
       hasEmail: !!email,
       hasKey: !!key,
-    });
+    }, 'Google Drive credentials missing');
+    // Ensure credentials are set in Render environment variables
     throw new Error('Google Drive service account credentials are not configured');
   }
 
