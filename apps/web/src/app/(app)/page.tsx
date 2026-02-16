@@ -88,12 +88,18 @@ export default function DashboardPage() {
             an invite code.
           </p>
           <div className="flex gap-3">
-            <button className="from-primary to-accent rounded-xl bg-gradient-to-r px-5 py-2.5 font-medium text-white shadow-md transition-opacity hover:opacity-90">
+            <Link
+              href="/household/setup"
+              className="from-primary to-accent rounded-xl bg-gradient-to-r px-5 py-2.5 font-medium text-white shadow-md transition-opacity hover:opacity-90"
+            >
               Create Household
-            </button>
-            <button className="border-border text-foreground hover:bg-hover rounded-xl border px-5 py-2.5 font-medium transition-colors">
+            </Link>
+            <Link
+              href="/household/setup"
+              className="border-border text-foreground hover:bg-hover rounded-xl border px-5 py-2.5 font-medium transition-colors"
+            >
               Join with Code
-            </button>
+            </Link>
           </div>
         </div>
       )}
