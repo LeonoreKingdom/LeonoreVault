@@ -3,7 +3,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { Search, SlidersHorizontal, X } from 'lucide-react';
 import { ITEM_STATUSES, STATUS_CONFIG } from '@leonorevault/shared';
-type ItemStatus = (typeof ITEM_STATUSES)[number];
 import type { ItemFilters } from '@/stores/items';
 
 interface ItemFiltersBarProps {
@@ -78,7 +77,7 @@ export default function ItemFiltersBar({ filters, onFilterChange }: ItemFiltersB
           <option value="">All Statuses</option>
           {ITEM_STATUSES.map((s) => (
             <option key={s} value={s}>
-              {STATUS_CONFIG[s as ItemStatus].label}
+              {STATUS_CONFIG[s as keyof typeof STATUS_CONFIG].label}
             </option>
           ))}
         </select>

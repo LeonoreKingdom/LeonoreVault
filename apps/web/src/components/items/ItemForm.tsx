@@ -173,7 +173,7 @@ export default function ItemForm({ item }: ItemFormProps) {
               >
                 {ITEM_STATUSES.map((s) => (
                   <option key={s} value={s}>
-                    {STATUS_CONFIG[s as ItemStatus].label}
+                    {STATUS_CONFIG[s as keyof typeof STATUS_CONFIG].label}
                   </option>
                 ))}
               </select>

@@ -19,7 +19,7 @@ interface StatusBadgeProps {
  * Color-coded status pill badge.
  */
 export default function StatusBadge({ status, size = 'sm' }: StatusBadgeProps) {
-  const config = STATUS_CONFIG[status];
+  const config = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG];
   const colors = colorMap[config.color] || 'bg-muted/15 text-muted';
 
   return (

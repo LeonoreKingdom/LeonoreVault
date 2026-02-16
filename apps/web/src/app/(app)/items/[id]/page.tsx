@@ -186,7 +186,7 @@ export default function ItemDetailPage() {
                   s === 'borrowed' ? 'opacity-70' : ''
                 }`}
               >
-                {STATUS_CONFIG[s].label}
+                {STATUS_CONFIG[s as keyof typeof STATUS_CONFIG].label}
               </button>
             ))}
           </div>
