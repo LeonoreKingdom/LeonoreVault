@@ -78,6 +78,7 @@ export async function apiUpload<T>(
   onProgress?: (percent: number) => void,
 ): Promise<T> {
   const token = await getToken();
+  console.log('Upload debug: Retrieved token:', !!token);
   const url = `${API_URL}${path}`;
 
   return new Promise<T>((resolve, reject) => {

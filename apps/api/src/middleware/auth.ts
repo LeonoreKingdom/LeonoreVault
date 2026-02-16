@@ -34,6 +34,7 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
     const authHeader = req.headers.authorization;
 
     if (!authHeader?.startsWith('Bearer ')) {
+      logger.warn({ headers: req.headers }, 'Auth header missing or invalid');
       throw new AppError(401, 'Missing or invalid authorization header', 'UNAUTHORIZED');
     }
 
