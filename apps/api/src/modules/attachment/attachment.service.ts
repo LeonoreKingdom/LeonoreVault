@@ -110,8 +110,13 @@ export async function uploadFilesToDrive(
       }
 
       results.push(toCamelCase(data));
-    } catch (err) {
-      logger.error({ err, fileName: file.originalname }, 'File upload failed');
+    } catch (err: any) {
+      logger.error({ 
+        err, 
+        message: err.message,
+        step: 'uploadFilesToDrive',
+        fileName: file.originalname 
+      }, 'File upload failed');
       throw err;
     }
   }
