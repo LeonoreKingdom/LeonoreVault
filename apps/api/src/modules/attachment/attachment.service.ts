@@ -61,6 +61,7 @@ export async function uploadFilesToDrive(
           body: Readable.from(file.buffer),
         },
         fields: 'id,webViewLink,thumbnailLink',
+        supportsAllDrives: true,
       });
 
       const driveFileId = driveResponse.data.id;
@@ -76,6 +77,7 @@ export async function uploadFilesToDrive(
           role: 'reader',
           type: 'anyone',
         },
+        supportsAllDrives: true,
       });
 
       // Build thumbnail URL for images
@@ -210,7 +212,7 @@ export async function removeAttachment(
   let driveFileDeleted = false;
   try {
     const drive = getDriveClient();
-    await drive.files.delete({ fileId: attachment.drive_file_id });
+    await drive.files.delete({ fileId: attachment.drive_file_id, supportsAllDrives: true });
     driveFileDeleted = true;
   } catch (err) {
     // Non-blocking — the DB record is already deleted

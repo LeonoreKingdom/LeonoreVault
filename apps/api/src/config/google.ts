@@ -97,6 +97,7 @@ export async function getOrCreateHouseholdFolder(householdId: string): Promise<s
   const folderResponse = await drive.files.create({
     requestBody: folderMetadata,
     fields: 'id',
+    supportsAllDrives: true,
   });
 
   const folderId = folderResponse.data.id;
