@@ -51,7 +51,7 @@ export function getDriveClient(): drive_v3.Drive {
   const auth = new google.auth.JWT({
     email,
     key: privateKey,
-    scopes: ['https://www.googleapis.com/auth/drive.file'],
+    scopes: ['https://www.googleapis.com/auth/drive'],
   });
 
   driveClient = google.drive({ version: 'v3', auth });
@@ -89,15 +89,17 @@ export async function getOrCreateHouseholdFolder(householdId: string): Promise<s
     mimeType: 'application/vnd.google-apps.folder',
   };
 
-  // If a root folder is configured (shared from personal drive), create inside it
-  if (env.GOOGLE_DRIVE_ROOT_FOLDER_ID) {
-    folderMetadata.parents = [env.GOOGLE_DRIVE_ROOT_FOLDER_ID];
+  // If a root folder / Shared Drive is configured, create inside it
+  const sharedDriveId = env.GOOGLE_DRIVE_ROOT_FOLDER_ID;
+  if (sharedDriveId) {
+    folderMetadata.parents = [sharedDriveId];
   }
 
   const folderResponse = await drive.files.create({
     requestBody: folderMetadata,
     fields: 'id',
     supportsAllDrives: true,
+    ...(sharedDriveId ? { driveId: sharedDriveId } : {}),
   });
 
   const folderId = folderResponse.data.id;

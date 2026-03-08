@@ -107,7 +107,7 @@ export async function uploadFilesToDrive(
       if (error) {
         logger.error({ error, fileName: file.originalname }, 'Failed to insert attachment');
         // Attempt cleanup: delete from Drive
-        await drive.files.delete({ fileId: driveFileId }).catch(() => {});
+        await drive.files.delete({ fileId: driveFileId, supportsAllDrives: true }).catch(() => {});
         throw new Error(error.message);
       }
 
