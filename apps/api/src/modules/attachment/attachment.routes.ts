@@ -41,7 +41,7 @@ export const attachmentRouter: IRouter = Router({ mergeParams: true });
 
 attachmentRouter.use(requireAuth);
 
-// POST upload — multipart file upload to Google Drive
+// POST upload — multipart file upload to Supabase Storage
 attachmentRouter.post(
   '/upload',
   requireRole(['admin', 'member'], 'householdId'),

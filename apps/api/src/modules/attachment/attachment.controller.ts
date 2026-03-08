@@ -19,7 +19,7 @@ export async function uploadFiles(req: Request, res: Response, next: NextFunctio
       return;
     }
 
-    const result = await svc.uploadFilesToDrive(
+    const result = await svc.uploadFiles(
       param(req, 'householdId'),
       param(req, 'itemId'),
       req.user!.id,

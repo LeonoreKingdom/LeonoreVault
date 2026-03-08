@@ -1,8 +1,12 @@
-import { Readable } from 'node:stream';
+import { randomUUID } from 'node:crypto';
 import { supabaseAdmin } from '../../config/supabase.js';
-import { getDriveClient, getOrCreateHouseholdFolder } from '../../config/google.js';
+import { env } from '../../config/env.js';
 import { logger } from '../../middleware/logger.js';
 import type { LinkAttachmentSchema } from '@leonorevault/shared';
+
+// ─── Constants ───────────────────────────────────────────────
+
+const STORAGE_BUCKET = 'attachments';
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -32,73 +36,60 @@ function toCamelCase(row: Record<string, unknown>): Attachment {
   };
 }
 
-// ─── Upload Files to Google Drive ───────────────────────────
+// ─── Upload Files to Supabase Storage ───────────────────────
 
 /**
- * Uploads files to Google Drive and creates attachment records.
+ * Uploads files to Supabase Storage and creates attachment records.
  */
-export async function uploadFilesToDrive(
+export async function uploadFiles(
   householdId: string,
   itemId: string,
   userId: string,
   files: Express.Multer.File[],
 ): Promise<Attachment[]> {
-  const drive = getDriveClient();
-  const folderId = await getOrCreateHouseholdFolder(householdId);
-
   const results: Attachment[] = [];
 
   for (const file of files) {
-    try {
-      // Upload to Google Drive
-      const driveResponse = await drive.files.create({
-        requestBody: {
-          name: file.originalname,
-          parents: [folderId],
-        },
-        media: {
-          mimeType: file.mimetype,
-          body: Readable.from(file.buffer),
-        },
-        fields: 'id,webViewLink,thumbnailLink',
-        supportsAllDrives: true,
-      });
+    // Build a unique storage path: householdId/itemId/uuid_originalname
+    const uniqueName = `${randomUUID()}_${file.originalname}`;
+    const storagePath = `${householdId}/${itemId}/${uniqueName}`;
 
-      const driveFileId = driveResponse.data.id;
-      if (!driveFileId) {
-        logger.error({ fileName: file.originalname }, 'Drive upload returned no file ID');
-        continue;
+    try {
+      // Upload to Supabase Storage
+      const { error: uploadError } = await supabaseAdmin.storage
+        .from(STORAGE_BUCKET)
+        .upload(storagePath, file.buffer, {
+          contentType: file.mimetype,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        logger.error({ error: uploadError, fileName: file.originalname }, 'Supabase Storage upload failed');
+        throw new Error(uploadError.message);
       }
 
-      // Make the file readable by anyone with the link
-      await drive.permissions.create({
-        fileId: driveFileId,
-        requestBody: {
-          role: 'reader',
-          type: 'anyone',
-        },
-        supportsAllDrives: true,
-      });
+      // Get public URL
+      const { data: urlData } = supabaseAdmin.storage
+        .from(STORAGE_BUCKET)
+        .getPublicUrl(storagePath);
 
-      // Build thumbnail URL for images
+      const publicUrl = urlData.publicUrl;
+
+      // Build thumbnail URL for images (Supabase image transformations)
       const thumbnailUrl = file.mimetype.startsWith('image/')
-        ? `https://drive.google.com/thumbnail?id=${driveFileId}&sz=w200`
+        ? `${publicUrl}?width=200&height=200&resize=contain`
         : null;
 
-      const webViewLink =
-        driveResponse.data.webViewLink ||
-        `https://drive.google.com/file/d/${driveFileId}/view`;
-
-      // Insert into DB
+      // Insert into DB — reuse drive_file_id column for storage path
       const { data, error } = await supabaseAdmin
         .from('attachments')
         .insert({
           item_id: itemId,
-          drive_file_id: driveFileId,
+          drive_file_id: storagePath,
           file_name: file.originalname,
           mime_type: file.mimetype,
           thumbnail_url: thumbnailUrl,
-          web_view_link: webViewLink,
+          web_view_link: publicUrl,
           created_by: userId,
         })
         .select()
@@ -106,18 +97,18 @@ export async function uploadFilesToDrive(
 
       if (error) {
         logger.error({ error, fileName: file.originalname }, 'Failed to insert attachment');
-        // Attempt cleanup: delete from Drive
-        await drive.files.delete({ fileId: driveFileId, supportsAllDrives: true }).catch(() => {});
+        // Attempt cleanup: delete from Storage
+        await supabaseAdmin.storage.from(STORAGE_BUCKET).remove([storagePath]);
         throw new Error(error.message);
       }
 
       results.push(toCamelCase(data));
     } catch (err: any) {
-      logger.error({ 
-        err, 
+      logger.error({
+        err,
         message: err.message,
-        step: 'uploadFilesToDrive',
-        fileName: file.originalname 
+        step: 'uploadFiles',
+        fileName: file.originalname,
       }, 'File upload failed');
       throw err;
     }
@@ -184,11 +175,11 @@ export async function getAttachments(itemId: string): Promise<Attachment[]> {
 // ─── Delete Attachment ──────────────────────────────────────
 
 /**
- * Deletes an attachment from DB and attempts to delete from Google Drive.
+ * Deletes an attachment from DB and attempts to delete from Supabase Storage.
  */
 export async function removeAttachment(
   attachmentId: string,
-): Promise<{ deleted: true; driveFileDeleted: boolean }> {
+): Promise<{ deleted: true; storageFileDeleted: boolean }> {
   // 1. Fetch the record
   const { data: attachment, error: fetchErr } = await supabaseAdmin
     .from('attachments')
@@ -208,16 +199,21 @@ export async function removeAttachment(
 
   if (deleteErr) throw new Error(deleteErr.message);
 
-  // 3. Attempt to delete from Google Drive (non-blocking)
-  let driveFileDeleted = false;
+  // 3. Attempt to delete from Supabase Storage (non-blocking)
+  let storageFileDeleted = false;
   try {
-    const drive = getDriveClient();
-    await drive.files.delete({ fileId: attachment.drive_file_id, supportsAllDrives: true });
-    driveFileDeleted = true;
+    const storagePath = attachment.drive_file_id;
+    // Only attempt storage delete if it looks like a storage path (not a URL)
+    if (storagePath && !storagePath.startsWith('http')) {
+      const { error: removeError } = await supabaseAdmin.storage
+        .from(STORAGE_BUCKET)
+        .remove([storagePath]);
+      if (!removeError) storageFileDeleted = true;
+    }
   } catch (err) {
     // Non-blocking — the DB record is already deleted
-    logger.warn({ err, attachmentId }, 'Failed to delete file from Google Drive');
+    logger.warn({ err, attachmentId }, 'Failed to delete file from Supabase Storage');
   }
 
-  return { deleted: true, driveFileDeleted };
+  return { deleted: true, storageFileDeleted };
 }
