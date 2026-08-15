@@ -10,6 +10,7 @@ export type { Category, CategoryTreeNode } from './category.js';
 export type { Location, LocationTreeNode } from './location.js';
 export type { Attachment } from './attachment.js';
 export type { ItemActivity } from './activity.js';
+export type { BorrowRecord, CreateBorrowRecordPayload } from './borrow-record.js';
 export type {
   ApiResponse,
   ApiError,

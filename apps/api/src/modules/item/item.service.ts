@@ -75,6 +75,59 @@ export async function listItems(householdId: string, query: ItemListQuerySchema)
 }
 
 /**
+ * Return the inventory counts and the latest returns for the overview page.
+ * Recent returns intentionally use a short, fixed window so the summary stays
+ * useful without exposing an unbounded activity feed.
+ */
+export async function getItemSummary(householdId: string) {
+  const recentReturnSince = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+
+  const [{ data: items, error: itemsError }, { data: returns, error: returnsError }] =
+    await Promise.all([
+      supabaseAdmin
+        .from('items')
+        .select('status')
+        .eq('household_id', householdId)
+        .is('deleted_at', null),
+      supabaseAdmin
+        .from('borrow_records')
+        .select('id, item_id, returned_at')
+        .eq('household_id', householdId)
+        .not('returned_at', 'is', null)
+        .gte('returned_at', recentReturnSince)
+        .order('returned_at', { ascending: false })
+        .limit(5),
+    ]);
+
+  if (itemsError) {
+    logger.error({ error: itemsError.message, householdId }, 'Failed to fetch item summary');
+    throw new AppError(500, 'Failed to fetch item summary', 'INTERNAL_ERROR');
+  }
+
+  if (returnsError) {
+    logger.error({ error: returnsError.message, householdId }, 'Failed to fetch recent returns');
+    throw new AppError(500, 'Failed to fetch recent returns', 'INTERNAL_ERROR');
+  }
+
+  const itemRows = items ?? [];
+  const recentReturns = (returns ?? []).map((record) => ({
+    id: record.id,
+    itemId: record.item_id,
+    returnedAt: record.returned_at,
+  }));
+
+  return {
+    summary: {
+      totalItems: itemRows.length,
+      storedItems: itemRows.filter((item) => item.status === 'stored').length,
+      checkedOutItems: itemRows.filter((item) => item.status === 'borrowed').length,
+      recentlyReturned: recentReturns.length,
+    },
+    recentReturns,
+  };
+}
+
+/**
  * Get a single item by ID, including its attachments.
  */
 export async function getItem(itemId: string, householdId: string) {
@@ -116,11 +169,7 @@ export async function getItem(itemId: string, householdId: string) {
 /**
  * Create a new item.
  */
-export async function createItem(
-  householdId: string,
-  userId: string,
-  payload: CreateItemSchema,
-) {
+export async function createItem(householdId: string, userId: string, payload: CreateItemSchema) {
   const { data, error } = await supabaseAdmin
     .from('items')
     .insert({
@@ -148,11 +197,7 @@ export async function createItem(
 /**
  * Update an existing item.
  */
-export async function updateItem(
-  itemId: string,
-  householdId: string,
-  payload: UpdateItemSchema,
-) {
+export async function updateItem(itemId: string, householdId: string, payload: UpdateItemSchema) {
   const updateData: Record<string, unknown> = {};
   if (payload.name !== undefined) updateData.name = payload.name;
   if (payload.description !== undefined) updateData.description = payload.description;
@@ -230,7 +275,10 @@ export async function updateItemStatus(
     updateData.borrow_due_date = null;
   }
 
-  logger.debug({ itemId, householdId, currentStatus, newStatus, updateData }, 'Updating item status');
+  logger.debug(
+    { itemId, householdId, currentStatus, newStatus, updateData },
+    'Updating item status',
+  );
 
   const { data, error } = await supabaseAdmin
     .from('items')
@@ -241,7 +289,10 @@ export async function updateItemStatus(
     .single();
 
   if (error) {
-    logger.error({ error: error.message, code: error.code, details: error.details, hint: error.hint }, 'Failed to update item status');
+    logger.error(
+      { error: error.message, code: error.code, details: error.details, hint: error.hint },
+      'Failed to update item status',
+    );
     throw new AppError(500, 'Failed to update item status', 'INTERNAL_ERROR');
   }
 

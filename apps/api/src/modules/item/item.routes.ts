@@ -24,6 +24,9 @@ itemRouter.get(
   ctrl.list,
 );
 
+// GET overview counts and recent returns
+itemRouter.get('/summary', requireRole(['admin', 'member', 'viewer'], 'householdId'), ctrl.summary);
+
 // GET single item
 itemRouter.get('/:id', requireRole(['admin', 'member', 'viewer'], 'householdId'), ctrl.getById);
 

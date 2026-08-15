@@ -295,6 +295,61 @@ export type Database = {
           },
         ];
       };
+      borrow_records: {
+        Row: {
+          id: string;
+          item_id: string;
+          household_id: string;
+          borrowed_by: string;
+          borrowed_at: string;
+          returned_at: string | null;
+          due_at: string | null;
+          note: string | null;
+        };
+        Insert: {
+          id?: string;
+          item_id: string;
+          household_id: string;
+          borrowed_by: string;
+          borrowed_at?: string;
+          returned_at?: string | null;
+          due_at?: string | null;
+          note?: string | null;
+        };
+        Update: {
+          id?: string;
+          item_id?: string;
+          household_id?: string;
+          borrowed_by?: string;
+          borrowed_at?: string;
+          returned_at?: string | null;
+          due_at?: string | null;
+          note?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'borrow_records_item_id_fkey';
+            columns: ['item_id'];
+            isOneToOne: false;
+            referencedRelation: 'items';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'borrow_records_household_id_fkey';
+            columns: ['household_id'];
+            isOneToOne: false;
+            referencedRelation: 'households';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'borrow_records_borrowed_by_fkey';
+            columns: ['borrowed_by'];
+            isOneToOne: false;
+            referencedRelation: 'users';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       attachments: {
         Row: {
           id: string;

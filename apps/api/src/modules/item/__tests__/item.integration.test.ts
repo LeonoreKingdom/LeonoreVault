@@ -14,12 +14,18 @@ function createChain(resolver: () => Promise<unknown>) {
   chain.eq = vi.fn(self);
   chain.is = vi.fn(self);
   chain.not = vi.fn(self);
+  chain.gte = vi.fn(self);
   chain.or = vi.fn(self);
   chain.ilike = vi.fn(self);
   chain.contains = vi.fn(self);
   chain.order = vi.fn(self);
+  chain.limit = vi.fn(self);
   chain.range = vi.fn(resolver);
   chain.single = vi.fn(resolver);
+  chain.then = vi.fn(
+    (onfulfilled: (value: unknown) => unknown, onrejected?: (reason: unknown) => unknown) =>
+      resolver().then(onfulfilled, onrejected),
+  );
   return chain;
 }
 
@@ -27,9 +33,11 @@ const membershipChain = createChain(() =>
   Promise.resolve({ data: { role: 'admin' }, error: null }),
 );
 let itemsChain = createChain(() => Promise.resolve({ data: null, error: null }));
+let borrowRecordsChain = createChain(() => Promise.resolve({ data: [], error: null }));
 
 const mockFrom = vi.fn((table: string) => {
   if (table === 'memberships') return membershipChain;
+  if (table === 'borrow_records') return borrowRecordsChain;
   return itemsChain;
 });
 
@@ -113,9 +121,7 @@ describe('Item API Integration', () => {
 
   describe('GET /api/households/:id/items', () => {
     it('returns 401 without auth token', async () => {
-      const res = await request(app)
-        .get(`/api/households/${HOUSEHOLD_ID}/items`)
-        .expect(401);
+      const res = await request(app).get(`/api/households/${HOUSEHOLD_ID}/items`).expect(401);
 
       expect(res.body.success).toBe(false);
     });
@@ -134,9 +140,7 @@ describe('Item API Integration', () => {
     it('returns items on successful auth', async () => {
       mockAuth();
 
-      itemsChain = createChain(() =>
-        Promise.resolve({ data: [mockItem], error: null, count: 1 }),
-      );
+      itemsChain = createChain(() => Promise.resolve({ data: [mockItem], error: null, count: 1 }));
 
       const res = await request(app)
         .get(`/api/households/${HOUSEHOLD_ID}/items`)
@@ -146,6 +150,96 @@ describe('Item API Integration', () => {
       expect(res.body.success).toBe(true);
       expect(res.body.data.items).toHaveLength(1);
       expect(res.body.data.items[0].name).toBe('Test Item');
+    });
+
+    it('applies search, filters, sorting, and pagination parameters', async () => {
+      mockAuth();
+
+      itemsChain = createChain(() => Promise.resolve({ data: [], error: null, count: 0 }));
+
+      const res = await request(app)
+        .get(`/api/households/${HOUSEHOLD_ID}/items`)
+        .query({
+          search: 'passport',
+          status: 'stored',
+          category_id: '880e8400-e29b-41d4-a716-446655440003',
+          location_id: '990e8400-e29b-41d4-a716-446655440004',
+          tags: 'important,travel',
+          sort: 'name',
+          order: 'asc',
+          page: 2,
+          limit: 10,
+        })
+        .set('Authorization', 'Bearer valid-token')
+        .expect(200);
+
+      expect(res.body.data.pagination).toEqual({
+        page: 2,
+        limit: 10,
+        total: 0,
+        totalPages: 0,
+      });
+      expect(itemsChain.eq).toHaveBeenCalledWith('status', 'stored');
+      expect(itemsChain.eq).toHaveBeenCalledWith(
+        'category_id',
+        '880e8400-e29b-41d4-a716-446655440003',
+      );
+      expect(itemsChain.eq).toHaveBeenCalledWith(
+        'location_id',
+        '990e8400-e29b-41d4-a716-446655440004',
+      );
+      expect(itemsChain.contains).toHaveBeenCalledWith('tags', ['important', 'travel']);
+      expect(itemsChain.or).toHaveBeenCalledWith(
+        'name.ilike.%passport%,description.ilike.%passport%',
+      );
+      expect(itemsChain.order).toHaveBeenCalledWith('name', { ascending: true });
+      expect(itemsChain.range).toHaveBeenCalledWith(10, 19);
+    });
+  });
+
+  describe('GET /api/households/:id/items/summary', () => {
+    it('returns item counts and recent returns', async () => {
+      mockAuth();
+
+      itemsChain = createChain(() =>
+        Promise.resolve({
+          data: [{ status: 'stored' }, { status: 'borrowed' }, { status: 'lost' }],
+          error: null,
+        }),
+      );
+      borrowRecordsChain = createChain(() =>
+        Promise.resolve({
+          data: [
+            {
+              id: 'aa0e8400-e29b-41d4-a716-446655440005',
+              item_id: ITEM_ID,
+              returned_at: TS,
+            },
+          ],
+          error: null,
+        }),
+      );
+
+      const res = await request(app)
+        .get(`/api/households/${HOUSEHOLD_ID}/items/summary`)
+        .set('Authorization', 'Bearer valid-token')
+        .expect(200);
+
+      expect(res.body.data.summary).toEqual({
+        totalItems: 3,
+        storedItems: 1,
+        checkedOutItems: 1,
+        recentlyReturned: 1,
+      });
+      expect(res.body.data.recentReturns).toEqual([
+        {
+          id: 'aa0e8400-e29b-41d4-a716-446655440005',
+          itemId: ITEM_ID,
+          returnedAt: TS,
+        },
+      ]);
+      expect(borrowRecordsChain.gte).toHaveBeenCalledWith('returned_at', expect.any(String));
+      expect(borrowRecordsChain.limit).toHaveBeenCalledWith(5);
     });
   });
 
@@ -172,9 +266,7 @@ describe('Item API Integration', () => {
     it('creates item with valid payload', async () => {
       mockAuth();
 
-      itemsChain = createChain(() =>
-        Promise.resolve({ data: mockItem, error: null }),
-      );
+      itemsChain = createChain(() => Promise.resolve({ data: mockItem, error: null }));
 
       const res = await request(app)
         .post(`/api/households/${HOUSEHOLD_ID}/items`)
@@ -189,17 +281,13 @@ describe('Item API Integration', () => {
 
   describe('DELETE /api/households/:id/items/:itemId', () => {
     it('returns 401 without auth', async () => {
-      await request(app)
-        .delete(`/api/households/${HOUSEHOLD_ID}/items/${ITEM_ID}`)
-        .expect(401);
+      await request(app).delete(`/api/households/${HOUSEHOLD_ID}/items/${ITEM_ID}`).expect(401);
     });
 
     it('soft-deletes item with valid auth', async () => {
       mockAuth();
 
-      itemsChain = createChain(() =>
-        Promise.resolve({ error: null }),
-      );
+      itemsChain = createChain(() => Promise.resolve({ error: null }));
 
       const res = await request(app)
         .delete(`/api/households/${HOUSEHOLD_ID}/items/${ITEM_ID}`)
