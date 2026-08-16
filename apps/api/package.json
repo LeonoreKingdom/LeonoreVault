@@ -9,13 +9,19 @@
     "start": "node --env-file=../../.env dist/index.js",
     "lint": "eslint src/ --ext .ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db:generate": "drizzle-kit generate --config=drizzle.config.ts",
+    "db:migrate": "drizzle-kit migrate --config=drizzle.config.ts",
+    "db:push": "drizzle-kit push --config=drizzle.config.ts",
+    "db:check": "drizzle-kit check --config=drizzle.config.ts"
   },
   "dependencies": {
     "@leonorevault/shared": "workspace:*",
+    "@libsql/client": "0.17.4",
     "@supabase/supabase-js": "^2.49.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.0",
+    "drizzle-orm": "0.45.2",
     "express": "^5.1.0",
     "googleapis": "^171.4.0",
     "helmet": "^8.0.0",
@@ -33,6 +39,7 @@
     "@types/node": "^20.0.0",
     "@types/qrcode": "^1.5.6",
     "@types/supertest": "^6.0.3",
+    "drizzle-kit": "0.31.10",
     "supertest": "^7.2.2",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",

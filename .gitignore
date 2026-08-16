@@ -30,6 +30,11 @@ pnpm-debug.log*
 # ─── Testing ─────────────────────────────
 coverage/
 
+# ─── Local SQLite ────────────────────────────────────────────
+apps/api/data/*.db
+apps/api/data/*.db-shm
+apps/api/data/*.db-wal
+
 # ─── Supabase ────────────────────────────
 supabase/.temp/
 
