@@ -3,6 +3,7 @@
 import AuthGuard from '@/components/AuthGuard';
 import Sidebar from '@/components/Sidebar';
 import BottomNav from '@/components/BottomNav';
+import AppHeader from '@/components/AppHeader';
 import ToastContainer from '@/components/Toast';
 import SyncIndicator from '@/components/SyncIndicator';
 
@@ -22,7 +23,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
           <div className="mx-auto max-w-6xl px-4 py-6 md:px-8 md:py-8">
             {/* Sync Status */}
-            <div className="mb-4 flex justify-end">
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <AppHeader />
               <SyncIndicator />
             </div>
             {children}

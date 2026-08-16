@@ -205,14 +205,73 @@ export type Database = {
           },
         ];
       };
+      storage_spots: {
+        Row: {
+          id: string;
+          household_id: string;
+          qr_token: string;
+          name: string;
+          parent_id: string | null;
+          spot_type: 'room' | 'cabinet' | 'shelf' | 'drawer' | 'box' | 'other';
+          description: string | null;
+          capacity: number;
+          sort_order: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          household_id: string;
+          qr_token?: string;
+          name: string;
+          parent_id?: string | null;
+          spot_type?: 'room' | 'cabinet' | 'shelf' | 'drawer' | 'box' | 'other';
+          description?: string | null;
+          capacity?: number;
+          sort_order?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          household_id?: string;
+          qr_token?: string;
+          name?: string;
+          parent_id?: string | null;
+          spot_type?: 'room' | 'cabinet' | 'shelf' | 'drawer' | 'box' | 'other';
+          description?: string | null;
+          capacity?: number;
+          sort_order?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'storage_spots_household_id_fkey';
+            columns: ['household_id'];
+            isOneToOne: false;
+            referencedRelation: 'households';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'storage_spots_parent_same_household_fkey';
+            columns: ['parent_id', 'household_id'];
+            isOneToOne: false;
+            referencedRelation: 'storage_spots';
+            referencedColumns: ['id', 'household_id'];
+          },
+        ];
+      };
       items: {
         Row: {
           id: string;
           household_id: string;
+          qr_token: string;
           name: string;
           description: string | null;
           category_id: string | null;
           location_id: string | null;
+          storage_spot_id: string | null;
           quantity: number;
           tags: string[];
           status: 'stored' | 'borrowed' | 'lost' | 'in_lost_found';
@@ -226,10 +285,12 @@ export type Database = {
         Insert: {
           id?: string;
           household_id: string;
+          qr_token?: string;
           name: string;
           description?: string | null;
           category_id?: string | null;
           location_id?: string | null;
+          storage_spot_id?: string | null;
           quantity?: number;
           tags?: string[];
           status?: 'stored' | 'borrowed' | 'lost' | 'in_lost_found';
@@ -243,10 +304,12 @@ export type Database = {
         Update: {
           id?: string;
           household_id?: string;
+          qr_token?: string;
           name?: string;
           description?: string | null;
           category_id?: string | null;
           location_id?: string | null;
+          storage_spot_id?: string | null;
           quantity?: number;
           tags?: string[];
           status?: 'stored' | 'borrowed' | 'lost' | 'in_lost_found';
@@ -278,6 +341,13 @@ export type Database = {
             isOneToOne: false;
             referencedRelation: 'locations';
             referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'items_storage_spot_same_household_fkey';
+            columns: ['storage_spot_id', 'household_id'];
+            isOneToOne: false;
+            referencedRelation: 'storage_spots';
+            referencedColumns: ['id', 'household_id'];
           },
           {
             foreignKeyName: 'items_created_by_fkey';
@@ -401,12 +471,138 @@ export type Database = {
           },
         ];
       };
+      notifications: {
+        Row: {
+          id: string;
+          user_id: string;
+          household_id: string;
+          item_id: string | null;
+          notification_type:
+            | 'return_due_soon'
+            | 'return_overdue'
+            | 'item_returned'
+            | 'item_updated'
+            | 'household_activity';
+          title: string;
+          body: string | null;
+          data: Json;
+          read_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          household_id: string;
+          item_id?: string | null;
+          notification_type:
+            | 'return_due_soon'
+            | 'return_overdue'
+            | 'item_returned'
+            | 'item_updated'
+            | 'household_activity';
+          title: string;
+          body?: string | null;
+          data?: Json;
+          read_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          household_id?: string;
+          item_id?: string | null;
+          notification_type?:
+            | 'return_due_soon'
+            | 'return_overdue'
+            | 'item_returned'
+            | 'item_updated'
+            | 'household_activity';
+          title?: string;
+          body?: string | null;
+          data?: Json;
+          read_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'notifications_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'users';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'notifications_household_id_fkey';
+            columns: ['household_id'];
+            isOneToOne: false;
+            referencedRelation: 'households';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'notifications_item_id_fkey';
+            columns: ['item_id'];
+            isOneToOne: false;
+            referencedRelation: 'items';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      notification_preferences: {
+        Row: {
+          user_id: string;
+          due_soon_enabled: boolean;
+          overdue_enabled: boolean;
+          returns_enabled: boolean;
+          item_updates_enabled: boolean;
+          household_activity_enabled: boolean;
+          weekly_summary_enabled: boolean;
+          pause_all: boolean;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          due_soon_enabled?: boolean;
+          overdue_enabled?: boolean;
+          returns_enabled?: boolean;
+          item_updates_enabled?: boolean;
+          household_activity_enabled?: boolean;
+          weekly_summary_enabled?: boolean;
+          pause_all?: boolean;
+          updated_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          due_soon_enabled?: boolean;
+          overdue_enabled?: boolean;
+          returns_enabled?: boolean;
+          item_updates_enabled?: boolean;
+          household_activity_enabled?: boolean;
+          weekly_summary_enabled?: boolean;
+          pause_all?: boolean;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'notification_preferences_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: true;
+            referencedRelation: 'users';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       item_activities: {
         Row: {
           id: string;
           item_id: string;
           user_id: string;
-          action: 'created' | 'updated' | 'moved' | 'status_changed' | 'attachment_added' | 'attachment_removed';
+          action:
+            | 'created'
+            | 'updated'
+            | 'moved'
+            | 'status_changed'
+            | 'attachment_added'
+            | 'attachment_removed';
           details: Json | null;
           created_at: string;
         };
@@ -414,7 +610,13 @@ export type Database = {
           id?: string;
           item_id: string;
           user_id: string;
-          action: 'created' | 'updated' | 'moved' | 'status_changed' | 'attachment_added' | 'attachment_removed';
+          action:
+            | 'created'
+            | 'updated'
+            | 'moved'
+            | 'status_changed'
+            | 'attachment_added'
+            | 'attachment_removed';
           details?: Json | null;
           created_at?: string;
         };
@@ -422,7 +624,13 @@ export type Database = {
           id?: string;
           item_id?: string;
           user_id?: string;
-          action?: 'created' | 'updated' | 'moved' | 'status_changed' | 'attachment_added' | 'attachment_removed';
+          action?:
+            | 'created'
+            | 'updated'
+            | 'moved'
+            | 'status_changed'
+            | 'attachment_added'
+            | 'attachment_removed';
           details?: Json | null;
           created_at?: string;
         };

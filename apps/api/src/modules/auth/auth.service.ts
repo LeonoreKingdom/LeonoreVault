@@ -1,5 +1,10 @@
-import type { GoogleCallbackSchema, RefreshTokenSchema } from '@leonorevault/shared';
-import { supabaseAdmin } from '../../config/supabase.js';
+import type {
+  GoogleCallbackSchema,
+  RefreshTokenSchema,
+  RegisterSchema,
+  LoginSchema,
+} from '@leonorevault/shared';
+import { createUserClient, supabaseAdmin, supabaseAuth } from '../../config/supabase.js';
 import { env } from '../../config/env.js';
 import { AppError } from '../../middleware/errorHandler.js';
 import { logger } from '../../middleware/logger.js';
@@ -23,6 +28,117 @@ interface UserProfile {
   avatarUrl: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+function mapSession(session: {
+  access_token: string;
+  refresh_token: string;
+  expires_at?: number | null;
+}): SessionData {
+  return {
+    accessToken: session.access_token,
+    refreshToken: session.refresh_token,
+    expiresAt: session.expires_at ?? Math.floor(Date.now() / 1000) + 3600,
+  };
+}
+
+async function getUserProfile(userId: string): Promise<UserProfile> {
+  const { data: userProfile, error } = await supabaseAdmin
+    .from('users')
+    .select('*')
+    .eq('id', userId)
+    .single();
+
+  if (error || !userProfile) {
+    logger.error({ error: error?.message, userId }, 'Failed to fetch user profile');
+    throw new AppError(500, 'Failed to retrieve user profile', 'INTERNAL_ERROR');
+  }
+
+  return {
+    id: userProfile.id,
+    email: userProfile.email,
+    displayName: userProfile.display_name,
+    avatarUrl: userProfile.avatar_url,
+    createdAt: userProfile.created_at,
+    updatedAt: userProfile.updated_at,
+  };
+}
+
+function mapRegistrationError(message: string): AppError {
+  if (/already registered|already exists|duplicate/i.test(message)) {
+    return new AppError(409, 'Email is already registered', 'EMAIL_ALREADY_REGISTERED');
+  }
+  if (/password/i.test(message)) {
+    return new AppError(400, 'Password does not meet the requirements', 'VALIDATION_ERROR');
+  }
+  return new AppError(400, 'Unable to register with these credentials', 'REGISTRATION_FAILED');
+}
+
+/** Register an email/password account through Supabase Auth. */
+export async function handleRegister(payload: RegisterSchema): Promise<{
+  user: UserProfile;
+  session: SessionData | null;
+  requiresEmailVerification: boolean;
+}> {
+  const { data, error } = await supabaseAuth.auth.signUp({
+    email: payload.email,
+    password: payload.password,
+    options: payload.name ? { data: { full_name: payload.name } } : undefined,
+  });
+
+  if (error) {
+    logger.debug({ error: error.message }, 'Email registration failed');
+    throw mapRegistrationError(error.message);
+  }
+
+  if (!data.user) {
+    throw new AppError(500, 'Registration did not return a user', 'INTERNAL_ERROR');
+  }
+
+  return {
+    user: await getUserProfile(data.user.id),
+    session: data.session ? mapSession(data.session) : null,
+    requiresEmailVerification: !data.session,
+  };
+}
+
+/** Sign in with email/password and return the active session. */
+export async function handleLogin(
+  payload: LoginSchema,
+): Promise<{ user: UserProfile; session: SessionData }> {
+  const { data, error } = await supabaseAuth.auth.signInWithPassword({
+    email: payload.email,
+    password: payload.password,
+  });
+
+  if (error) {
+    logger.debug({ error: error.message }, 'Email login failed');
+    if (/email not confirmed/i.test(error.message)) {
+      throw new AppError(403, 'Please verify your email before signing in', 'EMAIL_NOT_CONFIRMED');
+    }
+    throw new AppError(401, 'Invalid email or password', 'INVALID_CREDENTIALS');
+  }
+
+  if (!data.user || !data.session) {
+    throw new AppError(401, 'Invalid email or password', 'INVALID_CREDENTIALS');
+  }
+
+  return {
+    user: await getUserProfile(data.user.id),
+    session: mapSession(data.session),
+  };
+}
+
+/** Revoke the current Supabase session. */
+export async function handleLogout(accessToken: string): Promise<{ signedOut: true }> {
+  const { error } = await createUserClient(accessToken).auth.signOut();
+
+  if (error) {
+    logger.error({ error: error.message }, 'Logout failed');
+    throw new AppError(500, 'Failed to sign out', 'INTERNAL_ERROR');
+  }
+
+  return { signedOut: true };
 }
 
 /**
@@ -56,31 +172,14 @@ export async function handleGoogleCallback(
     throw new AppError(500, 'No session returned from auth exchange', 'INTERNAL_ERROR');
   }
 
-  // Fetch the user profile from public.users (created by auth trigger)
-  const { data: userProfile, error: profileError } = await supabaseAdmin
-    .from('users')
-    .select('*')
-    .eq('id', authUser.id)
-    .single();
-
-  if (profileError || !userProfile) {
-    logger.error({ error: profileError?.message }, 'Failed to fetch user profile after OAuth');
-    throw new AppError(500, 'Failed to retrieve user profile', 'INTERNAL_ERROR');
-  }
+  const userProfile = await getUserProfile(authUser.id);
 
   return {
     user: {
-      id: userProfile.id,
-      email: userProfile.email,
-      displayName: userProfile.display_name,
-      avatarUrl: userProfile.avatar_url,
-      createdAt: userProfile.created_at,
-      updatedAt: userProfile.updated_at,
+      ...userProfile,
     },
     session: {
-      accessToken: session.access_token,
-      refreshToken: session.refresh_token,
-      expiresAt: session.expires_at ?? Math.floor(Date.now() / 1000) + 3600,
+      ...mapSession(session),
     },
   };
 }
@@ -113,9 +212,7 @@ export async function handleRefreshToken(
 
   return {
     session: {
-      accessToken: session.access_token,
-      refreshToken: session.refresh_token,
-      expiresAt: session.expires_at ?? Math.floor(Date.now() / 1000) + 3600,
+      ...mapSession(session),
     },
   };
 }

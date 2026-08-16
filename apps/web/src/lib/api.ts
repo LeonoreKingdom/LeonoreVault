@@ -1,51 +1,22 @@
 'use client';
 
-import { createClient } from '@/lib/supabase';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-
-/**
- * Get the current session's access token.
- */
-async function getToken(): Promise<string | null> {
-  const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
-  return session?.access_token ?? null;
-}
+import {
+  mockDownload,
+  mockRequest,
+  mockUploadAttachments,
+} from '@/lib/mock-service';
 
 /**
- * Typed API client that auto-attaches the Supabase auth token.
+ * Local service boundary used by the frontend-first mock slice.
+ * The method signatures mirror the future API contract so the UI does not
+ * need to know whether data comes from a mock, Next route handler, or Turso.
  */
 async function request<T>(
   method: string,
   path: string,
   options?: { body?: unknown; params?: Record<string, string> },
 ): Promise<T> {
-  const token = await getToken();
-
-  let url = `${API_URL}${path}`;
-  if (options?.params) {
-    const search = new URLSearchParams(options.params);
-    url += `?${search.toString()}`;
-  }
-
-  const res = await fetch(url, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    ...(options?.body ? { body: JSON.stringify(options.body) } : {}),
-  });
-
-  const json = await res.json();
-
-  if (!res.ok) {
-    const message = json?.error?.message || `Request failed (${res.status})`;
-    throw new Error(message);
-  }
-
-  return json.data as T;
+  return mockRequest<T>(method, path, options);
 }
 
 /** GET request */
@@ -68,49 +39,29 @@ export function apiDelete<T>(path: string) {
   return request<T>('DELETE', path);
 }
 
+/** Download a mock binary while preserving the future download contract. */
+export function apiDownload(
+  path: string,
+  options?: { method?: 'GET' | 'POST'; body?: unknown },
+): Promise<Blob> {
+  void options;
+  return mockDownload(path);
+}
+
 /**
- * Upload files via multipart/form-data with progress tracking.
- * Uses XMLHttpRequest because fetch doesn't support upload progress.
+ * Upload files to the local mock service with simulated progress.
+ * The callback remains compatible with the future presigned R2 upload flow.
  */
 export async function apiUpload<T>(
   path: string,
   formData: FormData,
   onProgress?: (percent: number) => void,
 ): Promise<T> {
-  const token = await getToken();
-  console.log('Upload debug: Retrieved token:', !!token);
-  const url = `${API_URL}${path}`;
+  onProgress?.(20);
+  const itemMatch = path.match(/\/items\/([^/]+)\/attachments/);
+  if (!itemMatch) throw new Error('Invalid attachment upload path');
 
-  return new Promise<T>((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', url);
-
-    if (token) {
-      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
-    }
-
-    xhr.upload.addEventListener('progress', (e) => {
-      if (e.lengthComputable && onProgress) {
-        onProgress(Math.round((e.loaded / e.total) * 100));
-      }
-    });
-
-    xhr.addEventListener('load', () => {
-      try {
-        const json = JSON.parse(xhr.responseText);
-        if (xhr.status >= 200 && xhr.status < 300) {
-          resolve(json.data as T);
-        } else {
-          reject(new Error(json?.error?.message || `Upload failed (${xhr.status})`));
-        }
-      } catch {
-        reject(new Error('Failed to parse upload response'));
-      }
-    });
-
-    xhr.addEventListener('error', () => reject(new Error('Upload network error')));
-    xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
-
-    xhr.send(formData);
-  });
+  const result = await mockUploadAttachments(itemMatch[1]!, formData);
+  onProgress?.(100);
+  return result as T;
 }

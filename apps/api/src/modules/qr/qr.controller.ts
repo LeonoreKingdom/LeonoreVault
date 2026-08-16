@@ -6,6 +6,17 @@ const param = (req: Request, name: string) => {
   return Array.isArray(v) ? v[0]! : v!;
 };
 
+/** GET /api/households/:householdId/qr/resolve?token=... */
+export async function resolve(req: Request, res: Response, next: NextFunction) {
+  try {
+    const token = (req.validated?.token ?? req.query.token) as string;
+    const result = await svc.resolveQrToken(param(req, 'householdId'), token);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
 /** GET /api/households/:householdId/items/:itemId/qr */
 export async function generateQr(req: Request, res: Response, next: NextFunction) {
   try {

@@ -17,6 +17,16 @@ categoryRouter.use(requireAuth);
 categoryRouter.get('/', requireRole(['admin', 'member', 'viewer'], 'householdId'), ctrl.getTree);
 
 // Write operations — admin + member only
-categoryRouter.post('/', requireRole(['admin', 'member'], 'householdId'), validate(createCategorySchema), ctrl.create);
-categoryRouter.patch('/:id', requireRole(['admin', 'member'], 'householdId'), validate(updateCategorySchema), ctrl.update);
+categoryRouter.post(
+  '/',
+  requireRole(['admin', 'member'], 'householdId'),
+  validate(createCategorySchema),
+  ctrl.create,
+);
+categoryRouter.patch(
+  '/:id',
+  requireRole(['admin', 'member'], 'householdId'),
+  validate(updateCategorySchema),
+  ctrl.update,
+);
 categoryRouter.delete('/:id', requireRole(['admin'], 'householdId'), ctrl.remove);

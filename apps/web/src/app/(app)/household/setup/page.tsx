@@ -3,10 +3,8 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth';
-import { createClient } from '@/lib/supabase';
+import { apiPost } from '@/lib/api';
 import { Home as HomeIcon, Plus, UserPlus, ArrowRight, Loader2 } from 'lucide-react';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
 type Mode = 'choose' | 'create' | 'join';
 
@@ -19,14 +17,6 @@ export default function HouseholdSetupPage() {
   const router = useRouter();
   const { fetchProfile } = useAuthStore();
 
-  async function getToken() {
-    const supabase = createClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    return session?.access_token;
-  }
-
   async function handleCreate() {
     if (!name.trim()) {
       setError('Name is required');
@@ -35,17 +25,7 @@ export default function HouseholdSetupPage() {
     setLoading(true);
     setError('');
     try {
-      const token = await getToken();
-      const res = await fetch(`${API_URL}/api/households`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ name: name.trim() }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || 'Failed to create');
+      await apiPost('/api/households', { name: name.trim() });
       await fetchProfile();
       router.replace('/');
     } catch (err: unknown) {
@@ -63,17 +43,9 @@ export default function HouseholdSetupPage() {
     setLoading(true);
     setError('');
     try {
-      const token = await getToken();
-      const res = await fetch(`${API_URL}/api/households/join`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ invite_code: inviteCode.trim().toUpperCase() }),
+      await apiPost('/api/households/join', {
+        invite_code: inviteCode.trim().toUpperCase(),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || 'Failed to join');
       await fetchProfile();
       router.replace('/');
     } catch (err: unknown) {
@@ -140,7 +112,13 @@ export default function HouseholdSetupPage() {
 
         {/* Create Form */}
         {mode === 'create' && (
-          <div className="border-border bg-surface space-y-4 rounded-2xl border p-6">
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleCreate();
+            }}
+            className="border-border bg-surface space-y-4 rounded-2xl border p-6"
+          >
             <div>
               <label htmlFor="household-name" className="mb-1.5 block text-sm font-medium">
                 Household Name
@@ -149,18 +127,28 @@ export default function HouseholdSetupPage() {
                 id="household-name"
                 type="text"
                 value={name}
-                onChange={(e) => setName(e.target.value)}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setError('');
+                }}
                 placeholder="e.g. Casa Leonore"
                 maxLength={100}
+                required
                 className="border-border bg-background text-foreground placeholder:text-muted-light focus:ring-primary/40 focus:border-primary w-full rounded-xl border px-4 py-2.5 transition-all focus:outline-none focus:ring-2"
                 autoFocus
+                aria-describedby={error ? 'household-name-error' : undefined}
               />
             </div>
 
-            {error && <p className="text-danger text-sm">{error}</p>}
+            {error && (
+              <p id="household-name-error" role="alert" className="text-danger text-sm">
+                {error}
+              </p>
+            )}
 
             <div className="flex gap-3">
               <button
+                type="button"
                 onClick={() => {
                   setMode('choose');
                   setError('');
@@ -170,15 +158,15 @@ export default function HouseholdSetupPage() {
                 Back
               </button>
               <button
-                onClick={handleCreate}
-                disabled={loading}
+                type="submit"
+                disabled={loading || !name.trim()}
                 className="from-primary to-accent flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r px-4 py-2.5 font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
               >
                 {loading && <Loader2 size={16} className="animate-spin" />}
                 {loading ? 'Creating...' : 'Create'}
               </button>
             </div>
-          </div>
+          </form>
         )}
 
         {/* Join Form */}

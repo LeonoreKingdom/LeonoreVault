@@ -4,18 +4,8 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuthStore } from '@/stores/auth';
 import { useItemsStore, type Item } from '@/stores/items';
-import { createClient } from '@/lib/supabase';
+import { apiDownload } from '@/lib/api';
 import { ArrowLeft, QrCode, Download, Loader2, CheckSquare, Square, Printer } from 'lucide-react';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-
-async function getToken() {
-  const supabase = createClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-  return session?.access_token ?? null;
-}
 
 type Layout = 'grid-8' | 'grid-24';
 
@@ -25,6 +15,7 @@ export default function PrintLabelsPage() {
   const householdId = membership?.householdId;
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [previewItemId, setPreviewItemId] = useState<string | null>(null);
   const [layout, setLayout] = useState<Layout>('grid-8');
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +27,7 @@ export default function PrintLabelsPage() {
   // ─── Selection ──────────────────────────────────────────
 
   const toggleItem = (id: string) => {
+    setPreviewItemId(id);
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -43,6 +35,8 @@ export default function PrintLabelsPage() {
       return next;
     });
   };
+
+  const previewItem = items.find((item) => item.id === previewItemId) ?? items[0] ?? null;
 
   const toggleAll = () => {
     if (selected.size === items.length) {
@@ -57,13 +51,9 @@ export default function PrintLabelsPage() {
   const downloadQr = async (item: Item) => {
     if (!householdId) return;
     try {
-      const token = await getToken();
-      const url = `${API_URL}/api/households/${householdId}/items/${item.id}/qr?format=png&size=512`;
-      const res = await fetch(url, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!res.ok) throw new Error('Failed to download QR');
-      const blob = await res.blob();
+      const blob = await apiDownload(
+        `/api/households/${householdId}/items/${item.id}/qr?format=png&size=512`,
+      );
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = `${item.name}-qr.png`;
@@ -82,22 +72,10 @@ export default function PrintLabelsPage() {
     setError(null);
 
     try {
-      const token = await getToken();
-      const res = await fetch(`${API_URL}/api/households/${householdId}/items/qr-batch`, {
+      const blob = await apiDownload(`/api/households/${householdId}/items/qr-batch`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ itemIds: Array.from(selected), layout }),
+        body: { itemIds: Array.from(selected), layout },
       });
-
-      if (!res.ok) {
-        const json = await res.json().catch(() => null);
-        throw new Error(json?.error?.message || 'Failed to generate PDF');
-      }
-
-      const blob = await res.blob();
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = `qr-labels-${new Date().toISOString().slice(0, 10)}.pdf`;
@@ -260,6 +238,63 @@ export default function PrintLabelsPage() {
             );
           })}
         </div>
+      )}
+
+      {/* Label Preview */}
+      {!loading && previewItem && (
+        <section
+          className="border-border bg-surface rounded-2xl border p-5 shadow-sm sm:p-6"
+          aria-labelledby="label-preview-heading"
+        >
+          <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p className="text-primary text-xs font-semibold uppercase tracking-[0.16em]">
+                Preview
+              </p>
+              <h2 id="label-preview-heading" className="mt-1 text-lg font-bold">
+                QR label for {previewItem.name}
+              </h2>
+              <p className="text-muted mt-0.5 text-sm">
+                Check the label before downloading or printing it.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => downloadQr(previewItem)}
+              className="border-border text-foreground hover:bg-hover inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition-colors"
+            >
+              <Download size={16} />
+              Download PNG
+            </button>
+          </div>
+
+          <div className="grid gap-5 md:grid-cols-[220px_minmax(0,1fr)] md:items-center">
+            <div className="border-border bg-background mx-auto w-full max-w-[220px] rounded-2xl border p-4 text-center">
+              <div className="flex aspect-square items-center justify-center rounded-xl bg-white p-4 text-slate-950 shadow-inner">
+                <QrCode size={144} strokeWidth={1.1} aria-label="QR code preview" />
+              </div>
+              <p className="mt-3 truncate text-sm font-bold">{previewItem.name}</p>
+              <p className="text-muted mt-1 text-xs">LV · {previewItem.id.slice(0, 8)}</p>
+            </div>
+
+            <div className="space-y-3">
+              <div className="bg-primary/5 text-muted rounded-xl px-4 py-3 text-sm">
+                <p className="text-foreground font-semibold">Selected item</p>
+                <p className="mt-1">{previewItem.name}</p>
+              </div>
+              <div className="border-border rounded-xl border border-dashed px-4 py-3 text-sm">
+                <p className="font-semibold">Print layout</p>
+                <p className="text-muted mt-1">
+                  {layout === 'grid-8' ? '2 × 4 labels per sheet' : '4 × 6 labels per sheet'}
+                </p>
+              </div>
+              <p className="text-muted-light text-xs">
+                This preview uses mock QR artwork. The generated file will use the item token when
+                the data layer is connected.
+              </p>
+            </div>
+          </div>
+        </section>
       )}
     </div>
   );

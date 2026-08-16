@@ -1,5 +1,6 @@
 'use client';
 
+import NextImage from 'next/image';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { apiGet, apiUpload, apiDelete } from '@/lib/api';
 import {
@@ -25,6 +26,7 @@ interface Attachment {
   webViewLink: string | null;
   createdBy: string;
   createdAt: string;
+  localPreviewUrl?: string | null;
 }
 
 interface AttachmentPanelProps {
@@ -51,8 +53,17 @@ export default function AttachmentPanel({
   const [dragActive, setDragActive] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const localPreviewUrls = useRef(new Set<string>());
 
   const basePath = `/api/households/${householdId}/items/${itemId}/attachments`;
+
+  useEffect(() => {
+    const previewUrls = localPreviewUrls.current;
+    return () => {
+      previewUrls.forEach((url) => URL.revokeObjectURL(url));
+      previewUrls.clear();
+    };
+  }, []);
 
   // ─── Fetch ──────────────────────────────────────────────
 
@@ -74,6 +85,7 @@ export default function AttachmentPanel({
   // ─── Upload ─────────────────────────────────────────────
 
   const handleFiles = async (files: FileList | File[]) => {
+    if (uploading) return;
     const fileArray = Array.from(files);
     const oversized = fileArray.find((f) => f.size > MAX_FILE_SIZE);
     if (oversized) {
@@ -85,6 +97,13 @@ export default function AttachmentPanel({
     setProgress(0);
     setError(null);
 
+    const previewUrls = fileArray.map((file) => {
+      if (!file.type.startsWith('image/')) return null;
+      const url = URL.createObjectURL(file);
+      localPreviewUrls.current.add(url);
+      return url;
+    });
+
     try {
       const formData = new FormData();
       fileArray.forEach((f) => formData.append('files', f));
@@ -92,9 +111,22 @@ export default function AttachmentPanel({
       const result = await apiUpload<Attachment[]>(`${basePath}/upload`, formData, (p) =>
         setProgress(p),
       );
-      setAttachments((prev) => [...result, ...prev]);
+      const attachmentsWithPreviews = result.map((attachment, index) => ({
+        ...attachment,
+        localPreviewUrl: previewUrls[index] ?? null,
+      }));
+      const usedPreviewUrls = new Set(
+        attachmentsWithPreviews.flatMap((attachment) =>
+          attachment.localPreviewUrl ? [attachment.localPreviewUrl] : [],
+        ),
+      );
+      previewUrls.forEach((url) => {
+        if (url && !usedPreviewUrls.has(url)) releasePreviewUrl(url);
+      });
+      setAttachments((prev) => [...attachmentsWithPreviews, ...prev]);
       setProgress(100);
     } catch (err) {
+      previewUrls.forEach((url) => releasePreviewUrl(url));
       setError((err as Error).message || 'Upload failed');
     } finally {
       setTimeout(() => {
@@ -109,6 +141,8 @@ export default function AttachmentPanel({
   const handleDelete = async (attachmentId: string) => {
     try {
       await apiDelete(`${basePath}/${attachmentId}`);
+      const attachment = attachments.find((candidate) => candidate.id === attachmentId);
+      releasePreviewUrl(attachment?.localPreviewUrl);
       setAttachments((prev) => prev.filter((a) => a.id !== attachmentId));
       setDeleteId(null);
     } catch (err) {
@@ -136,6 +170,12 @@ export default function AttachmentPanel({
   // ─── Helpers ────────────────────────────────────────────
 
   const isImage = (mime: string) => mime.startsWith('image/');
+
+  function releasePreviewUrl(url: string | null | undefined) {
+    if (!url || !localPreviewUrls.current.has(url)) return;
+    URL.revokeObjectURL(url);
+    localPreviewUrls.current.delete(url);
+  }
 
   const getFileIcon = (mime: string) => {
     if (isImage(mime)) return <ImageIcon size={20} className="text-blue-400" />;
@@ -176,6 +216,15 @@ export default function AttachmentPanel({
           onDragOver={handleDrag}
           onDrop={handleDrop}
           onClick={() => fileInputRef.current?.click()}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              fileInputRef.current?.click();
+            }
+          }}
+          role="button"
+          tabIndex={0}
+          aria-label="Upload attachments"
           className={`mb-4 flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-8 transition-all ${
             dragActive
               ? 'border-primary bg-primary/5 scale-[1.01]'
@@ -192,8 +241,12 @@ export default function AttachmentPanel({
             type="file"
             accept={ACCEPTED}
             multiple
+            id="attachment-files"
             className="hidden"
-            onChange={(e) => e.target.files && handleFiles(e.target.files)}
+            onChange={(event) => {
+              if (event.target.files) void handleFiles(event.target.files);
+              event.currentTarget.value = '';
+            }}
           />
         </div>
       )}
@@ -231,11 +284,14 @@ export default function AttachmentPanel({
               className="border-border hover:bg-hover group flex items-center gap-3 rounded-xl border p-3 transition-colors"
             >
               {/* Thumbnail / Icon */}
-              {isImage(att.mimeType) && att.thumbnailUrl ? (
+              {isImage(att.mimeType) && (att.thumbnailUrl || att.localPreviewUrl) ? (
                 <div className="bg-background flex h-12 w-12 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg">
-                  <img
-                    src={att.thumbnailUrl}
+                  <NextImage
+                    src={att.thumbnailUrl ?? att.localPreviewUrl ?? ''}
                     alt={att.fileName}
+                    width={48}
+                    height={48}
+                    unoptimized
                     className="h-full w-full object-cover"
                   />
                 </div>

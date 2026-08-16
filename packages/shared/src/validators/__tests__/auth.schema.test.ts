@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { googleCallbackSchema, refreshTokenSchema } from '../auth.schema.js';
+import {
+  googleCallbackSchema,
+  refreshTokenSchema,
+  registerSchema,
+  loginSchema,
+} from '../auth.schema.js';
 
 describe('googleCallbackSchema', () => {
   it('accepts valid code + redirectUri', () => {
@@ -18,9 +23,7 @@ describe('googleCallbackSchema', () => {
   });
 
   it('rejects invalid redirectUri', () => {
-    expect(() =>
-      googleCallbackSchema.parse({ code: 'abc', redirectUri: 'not-a-url' }),
-    ).toThrow();
+    expect(() => googleCallbackSchema.parse({ code: 'abc', redirectUri: 'not-a-url' })).toThrow();
   });
 
   it('rejects missing fields', () => {
@@ -42,5 +45,36 @@ describe('refreshTokenSchema', () => {
 
   it('rejects missing field', () => {
     expect(() => refreshTokenSchema.parse({})).toThrow();
+  });
+});
+
+describe('registerSchema', () => {
+  it('accepts a strong password and optional name', () => {
+    expect(
+      registerSchema.parse({
+        email: 'leonore@example.com',
+        password: 'Strong!1',
+        name: 'Leonore',
+      }),
+    ).toEqual({ email: 'leonore@example.com', password: 'Strong!1', name: 'Leonore' });
+  });
+
+  it('rejects weak passwords', () => {
+    expect(() =>
+      registerSchema.parse({ email: 'leonore@example.com', password: 'password' }),
+    ).toThrow();
+  });
+});
+
+describe('loginSchema', () => {
+  it('accepts valid credentials', () => {
+    expect(loginSchema.parse({ email: 'leonore@example.com', password: 'password' })).toEqual({
+      email: 'leonore@example.com',
+      password: 'password',
+    });
+  });
+
+  it('rejects an invalid email', () => {
+    expect(() => loginSchema.parse({ email: 'not-an-email', password: 'password' })).toThrow();
   });
 });

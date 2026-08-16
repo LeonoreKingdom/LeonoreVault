@@ -1,8 +1,19 @@
 'use client';
 
 import Link from 'next/link';
-import { FormEvent, useState } from 'react';
-import { ArrowLeft, CheckCircle2, MapPin, Package, Save, Sparkles, Tag } from 'lucide-react';
+import NextImage from 'next/image';
+import { FormEvent, useEffect, useState } from 'react';
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Image as ImageIcon,
+  MapPin,
+  Package,
+  Save,
+  Sparkles,
+  Tag,
+  Trash2,
+} from 'lucide-react';
 
 type NewItemForm = {
   name: string;
@@ -32,6 +43,14 @@ const inputClass =
 export default function NewItemPage() {
   const [formData, setFormData] = useState(initialForm);
   const [submitted, setSubmitted] = useState(false);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoPreviewUrl, setPhotoPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (photoPreviewUrl) URL.revokeObjectURL(photoPreviewUrl);
+    };
+  }, [photoPreviewUrl]);
 
   const updateField = <K extends keyof NewItemForm>(field: K, value: NewItemForm[K]) => {
     setFormData((current) => ({ ...current, [field]: value }));
@@ -47,6 +66,24 @@ export default function NewItemPage() {
   function resetForm() {
     setFormData(initialForm);
     setSubmitted(false);
+    setPhotoFile(null);
+    setPhotoPreviewUrl(null);
+  }
+
+  function removePhoto() {
+    setPhotoFile(null);
+    setPhotoPreviewUrl(null);
+    setSubmitted(false);
+  }
+
+  function handlePhotoChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    if (file && !file.type.startsWith('image/')) return;
+
+    setPhotoFile(file);
+    setPhotoPreviewUrl(file ? URL.createObjectURL(file) : null);
+    setSubmitted(false);
+    event.currentTarget.value = '';
   }
 
   const tags = formData.tags
@@ -129,6 +166,58 @@ export default function NewItemPage() {
                 maxLength={500}
                 className="border-border bg-background focus:border-primary focus:ring-primary/20 w-full resize-none rounded-xl border px-4 py-3 text-sm outline-none transition-colors focus:ring-2"
               />
+            </div>
+
+            <div>
+              <div className="mb-1.5 flex items-center justify-between gap-3">
+                <label htmlFor="item-photo" className="block text-sm font-semibold">
+                  Item photo <span className="text-muted font-normal">(optional)</span>
+                </label>
+                <span className="text-muted-light text-xs">JPG, PNG, or WEBP</span>
+              </div>
+              <input
+                id="item-photo"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={handlePhotoChange}
+                className="sr-only"
+              />
+              {photoPreviewUrl ? (
+                <div className="border-border bg-background relative overflow-hidden rounded-2xl border">
+                  <div className="relative aspect-[16/8] w-full">
+                    <NextImage
+                      src={photoPreviewUrl}
+                      alt={`Preview of ${photoFile?.name ?? 'selected item photo'}`}
+                      fill
+                      unoptimized
+                      sizes="(min-width: 1024px) 640px, 100vw"
+                      className="object-cover"
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-3 px-3 py-2.5">
+                    <p className="text-muted min-w-0 truncate text-xs">{photoFile?.name}</p>
+                    <button
+                      type="button"
+                      onClick={removePhoto}
+                      className="text-muted hover:text-danger hover:bg-danger/10 inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors"
+                    >
+                      <Trash2 size={14} />
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <label
+                  htmlFor="item-photo"
+                  className="border-border bg-background hover:border-primary/40 hover:bg-hover flex cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed px-5 py-8 text-center transition-colors"
+                >
+                  <span className="bg-primary/10 text-primary mb-3 flex h-10 w-10 items-center justify-center rounded-xl">
+                    <ImageIcon size={20} />
+                  </span>
+                  <span className="text-sm font-semibold">Choose a photo</span>
+                  <span className="text-muted mt-1 text-xs">Preview it here before saving the item.</span>
+                </label>
+              )}
             </div>
 
             <div className="grid gap-5 sm:grid-cols-2">
@@ -236,9 +325,22 @@ export default function NewItemPage() {
             </div>
             <div className="border-border rounded-2xl border p-4">
               <div className="mb-4 flex items-start gap-3">
-                <div className="bg-primary/10 text-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-xl">
-                  <Package size={20} />
-                </div>
+                {photoPreviewUrl ? (
+                  <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-xl">
+                    <NextImage
+                      src={photoPreviewUrl}
+                      alt=""
+                      fill
+                      unoptimized
+                      sizes="40px"
+                      className="object-cover"
+                    />
+                  </div>
+                ) : (
+                  <div className="bg-primary/10 text-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-xl">
+                    <Package size={20} />
+                  </div>
+                )}
                 <div className="min-w-0">
                   <h3 className="truncate font-semibold">{formData.name || 'Your item name'}</h3>
                   <p className="text-muted mt-0.5 text-sm">{formData.category}</p>

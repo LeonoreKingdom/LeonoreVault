@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { supabaseAdmin } from '../../config/supabase.js';
-import { env } from '../../config/env.js';
+import { AppError } from '../../middleware/errorHandler.js';
 import { logger } from '../../middleware/logger.js';
+import { MAX_ATTACHMENTS_PER_ITEM } from '@leonorevault/shared';
 import type { LinkAttachmentSchema } from '@leonorevault/shared';
 
 // ─── Constants ───────────────────────────────────────────────
@@ -36,6 +37,54 @@ function toCamelCase(row: Record<string, unknown>): Attachment {
   };
 }
 
+async function assertItemInHousehold(itemId: string, householdId: string) {
+  const { data, error } = await supabaseAdmin
+    .from('items')
+    .select('id')
+    .eq('id', itemId)
+    .eq('household_id', householdId)
+    .is('deleted_at', null)
+    .maybeSingle();
+
+  if (error) {
+    logger.error(
+      { error: error.message, itemId, householdId },
+      'Failed to validate item for attachment',
+    );
+    throw new AppError(500, 'Failed to validate item', 'INTERNAL_ERROR');
+  }
+  if (!data) throw new AppError(404, 'Item not found', 'NOT_FOUND');
+}
+
+async function getAttachmentCount(itemId: string) {
+  const { count, error } = await supabaseAdmin
+    .from('attachments')
+    .select('id', { count: 'exact', head: true })
+    .eq('item_id', itemId);
+
+  if (error) {
+    logger.error({ error: error.message, itemId }, 'Failed to count item attachments');
+    throw new AppError(500, 'Failed to check attachment limit', 'INTERNAL_ERROR');
+  }
+  return count ?? 0;
+}
+
+async function assertAttachmentCapacity(itemId: string, additionalCount: number) {
+  const currentCount = await getAttachmentCount(itemId);
+  if (currentCount + additionalCount > MAX_ATTACHMENTS_PER_ITEM) {
+    throw new AppError(
+      400,
+      `An item can have at most ${MAX_ATTACHMENTS_PER_ITEM} attachments`,
+      'ATTACHMENT_LIMIT',
+    );
+  }
+}
+
+function safeFileName(fileName: string) {
+  const safe = fileName.replace(/[\\/\0]/g, '_').trim();
+  return (safe || 'upload').slice(0, 255);
+}
+
 // ─── Upload Files to Supabase Storage ───────────────────────
 
 /**
@@ -47,14 +96,22 @@ export async function uploadFiles(
   userId: string,
   files: Express.Multer.File[],
 ): Promise<Attachment[]> {
+  await assertItemInHousehold(itemId, householdId);
+
+  await assertAttachmentCapacity(itemId, files.length);
+
   const results: Attachment[] = [];
+  const uploadedPaths: string[] = [];
+  const createdAttachmentIds: string[] = [];
 
-  for (const file of files) {
-    // Build a unique storage path: householdId/itemId/uuid_originalname
-    const uniqueName = `${randomUUID()}_${file.originalname}`;
-    const storagePath = `${householdId}/${itemId}/${uniqueName}`;
+  try {
+    for (const file of files) {
+      // Build a unique storage path: householdId/itemId/uuid_originalname
+      const fileName = safeFileName(file.originalname);
+      const uniqueName = `${randomUUID()}_${fileName}`;
+      const storagePath = `${householdId}/${itemId}/${uniqueName}`;
+      uploadedPaths.push(storagePath);
 
-    try {
       // Upload to Supabase Storage
       const { error: uploadError } = await supabaseAdmin.storage
         .from(STORAGE_BUCKET)
@@ -64,7 +121,10 @@ export async function uploadFiles(
         });
 
       if (uploadError) {
-        logger.error({ error: uploadError, fileName: file.originalname }, 'Supabase Storage upload failed');
+        logger.error(
+          { error: uploadError, fileName: file.originalname },
+          'Supabase Storage upload failed',
+        );
         throw new Error(uploadError.message);
       }
 
@@ -86,7 +146,7 @@ export async function uploadFiles(
         .insert({
           item_id: itemId,
           drive_file_id: storagePath,
-          file_name: file.originalname,
+          file_name: fileName,
           mime_type: file.mimetype,
           thumbnail_url: thumbnailUrl,
           web_view_link: publicUrl,
@@ -97,21 +157,24 @@ export async function uploadFiles(
 
       if (error) {
         logger.error({ error, fileName: file.originalname }, 'Failed to insert attachment');
-        // Attempt cleanup: delete from Storage
-        await supabaseAdmin.storage.from(STORAGE_BUCKET).remove([storagePath]);
         throw new Error(error.message);
       }
 
+      createdAttachmentIds.push(data.id as string);
       results.push(toCamelCase(data));
-    } catch (err: any) {
-      logger.error({
-        err,
-        message: err.message,
-        step: 'uploadFiles',
-        fileName: file.originalname,
-      }, 'File upload failed');
-      throw err;
     }
+  } catch (err: unknown) {
+    logger.error({ err, step: 'uploadFiles', itemId }, 'File upload failed');
+
+    if (createdAttachmentIds.length > 0) {
+      await supabaseAdmin.from('attachments').delete().in('id', createdAttachmentIds);
+    }
+    if (uploadedPaths.length > 0) {
+      await supabaseAdmin.storage.from(STORAGE_BUCKET).remove(uploadedPaths);
+    }
+
+    if (err instanceof AppError) throw err;
+    throw new AppError(502, 'Failed to upload attachment', 'UPLOAD_FAILED');
   }
 
   return results;
@@ -123,10 +186,14 @@ export async function uploadFiles(
  * Creates an attachment record for an external URL (no file upload).
  */
 export async function linkExternalAttachment(
+  householdId: string,
   itemId: string,
   userId: string,
   payload: LinkAttachmentSchema,
 ): Promise<Attachment> {
+  await assertItemInHousehold(itemId, householdId);
+  await assertAttachmentCapacity(itemId, 1);
+
   // Extract a drive file ID or use the URL itself
   const driveFileId = extractDriveId(payload.url) || payload.url;
 
@@ -144,7 +211,10 @@ export async function linkExternalAttachment(
     .select()
     .single();
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    logger.error({ error: error.message, itemId }, 'Failed to link attachment');
+    throw new AppError(500, 'Failed to link attachment', 'INTERNAL_ERROR');
+  }
   return toCamelCase(data);
 }
 
@@ -161,14 +231,19 @@ function extractDriveId(url: string): string | null {
 /**
  * Returns all attachments for an item.
  */
-export async function getAttachments(itemId: string): Promise<Attachment[]> {
+export async function getAttachments(itemId: string, householdId: string): Promise<Attachment[]> {
+  await assertItemInHousehold(itemId, householdId);
+
   const { data, error } = await supabaseAdmin
     .from('attachments')
     .select('*')
     .eq('item_id', itemId)
     .order('created_at', { ascending: false });
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    logger.error({ error: error.message, itemId }, 'Failed to list attachments');
+    throw new AppError(500, 'Failed to list attachments', 'INTERNAL_ERROR');
+  }
   return (data || []).map(toCamelCase);
 }
 
@@ -179,17 +254,18 @@ export async function getAttachments(itemId: string): Promise<Attachment[]> {
  */
 export async function removeAttachment(
   attachmentId: string,
+  householdId: string,
 ): Promise<{ deleted: true; storageFileDeleted: boolean }> {
   // 1. Fetch the record
   const { data: attachment, error: fetchErr } = await supabaseAdmin
     .from('attachments')
-    .select('drive_file_id')
+    .select('drive_file_id,item_id')
     .eq('id', attachmentId)
     .single();
 
-  if (fetchErr || !attachment) {
-    throw new Error('Attachment not found');
-  }
+  if (fetchErr || !attachment) throw new AppError(404, 'Attachment not found', 'NOT_FOUND');
+
+  await assertItemInHousehold(attachment.item_id as string, householdId);
 
   // 2. Delete from DB
   const { error: deleteErr } = await supabaseAdmin
@@ -197,7 +273,10 @@ export async function removeAttachment(
     .delete()
     .eq('id', attachmentId);
 
-  if (deleteErr) throw new Error(deleteErr.message);
+  if (deleteErr) {
+    logger.error({ error: deleteErr.message, attachmentId }, 'Failed to delete attachment');
+    throw new AppError(500, 'Failed to delete attachment', 'INTERNAL_ERROR');
+  }
 
   // 3. Attempt to delete from Supabase Storage (non-blocking)
   let storageFileDeleted = false;

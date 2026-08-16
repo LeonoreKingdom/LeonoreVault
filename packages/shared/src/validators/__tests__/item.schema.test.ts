@@ -3,6 +3,7 @@ import {
   createItemSchema,
   updateItemSchema,
   updateItemStatusSchema,
+  returnItemSchema,
   itemListQuerySchema,
 } from '../item.schema.js';
 
@@ -51,9 +52,7 @@ describe('createItemSchema', () => {
   });
 
   it('enforces max tag length (50 chars)', () => {
-    expect(() =>
-      createItemSchema.parse({ name: 'Test', tags: ['x'.repeat(51)] }),
-    ).toThrow();
+    expect(() => createItemSchema.parse({ name: 'Test', tags: ['x'.repeat(51)] })).toThrow();
   });
 
   it('enforces max 20 tags', () => {
@@ -110,6 +109,18 @@ describe('updateItemStatusSchema', () => {
 
   it('rejects missing status', () => {
     expect(() => updateItemStatusSchema.parse({})).toThrow();
+  });
+});
+
+describe('returnItemSchema', () => {
+  it('accepts an optional note', () => {
+    expect(returnItemSchema.parse({ note: 'Returned after use' })).toEqual({
+      note: 'Returned after use',
+    });
+  });
+
+  it('rejects an oversized note', () => {
+    expect(() => returnItemSchema.parse({ note: 'x'.repeat(1001) })).toThrow();
   });
 });
 

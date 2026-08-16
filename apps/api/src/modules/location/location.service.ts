@@ -52,12 +52,29 @@ function buildTree(flat: LocationRow[]): TreeNode[] {
   }
 
   const sortChildren = (nodes: TreeNode[]) => {
-    nodes.sort((a, b) => a.sortOrder - b.sortOrder);
+    nodes.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
     for (const n of nodes) sortChildren(n.children);
   };
   sortChildren(roots);
 
   return roots;
+}
+
+async function assertParentInHousehold(parentId: string, householdId: string) {
+  const { data, error } = await supabaseAdmin
+    .from('locations')
+    .select('id')
+    .eq('id', parentId)
+    .eq('household_id', householdId)
+    .maybeSingle();
+
+  if (error) {
+    logger.error({ error: error.message }, 'Failed to validate location parent');
+    throw new AppError(500, 'Failed to validate location parent', 'INTERNAL_ERROR');
+  }
+  if (!data) {
+    throw new AppError(400, 'The selected parent location is invalid', 'INVALID_PARENT');
+  }
 }
 
 // ─── Service Functions ──────────────────────────────────────
@@ -77,10 +94,9 @@ export async function getLocationTree(householdId: string) {
   return { tree: buildTree(data as LocationRow[]) };
 }
 
-export async function createLocation(
-  householdId: string,
-  payload: CreateLocationSchema,
-) {
+export async function createLocation(householdId: string, payload: CreateLocationSchema) {
+  if (payload.parent_id) await assertParentInHousehold(payload.parent_id, householdId);
+
   const { data, error } = await supabaseAdmin
     .from('locations')
     .insert({
@@ -94,11 +110,22 @@ export async function createLocation(
     .single();
 
   if (error) {
-    if (error.message.includes('depth')) {
+    if (error.code === '23514' || error.message.includes('depth')) {
       throw new AppError(400, 'Maximum location depth (3 levels) exceeded', 'DEPTH_EXCEEDED');
     }
-    if (error.message.includes('unique') || error.message.includes('duplicate')) {
-      throw new AppError(409, 'A location with this name already exists at this level', 'DUPLICATE');
+    if (error.code === '23503' || error.message.includes('foreign key')) {
+      throw new AppError(400, 'The selected parent location is invalid', 'INVALID_PARENT');
+    }
+    if (
+      error.code === '23505' ||
+      error.message.includes('unique') ||
+      error.message.includes('duplicate')
+    ) {
+      throw new AppError(
+        409,
+        'A location with this name already exists at this level',
+        'DUPLICATE',
+      );
     }
     logger.error({ error: error.message }, 'Failed to create location');
     throw new AppError(500, 'Failed to create location', 'INTERNAL_ERROR');
@@ -118,6 +145,16 @@ export async function updateLocation(
   if (payload.description !== undefined) updateData.description = payload.description;
   if (payload.sort_order !== undefined) updateData.sort_order = payload.sort_order;
 
+  if (Object.keys(updateData).length === 0) {
+    throw new AppError(400, 'At least one location field is required', 'EMPTY_UPDATE');
+  }
+  if (payload.parent_id) {
+    if (payload.parent_id === locationId) {
+      throw new AppError(400, 'A location cannot be its own parent', 'INVALID_PARENT');
+    }
+    await assertParentInHousehold(payload.parent_id, householdId);
+  }
+
   const { data, error } = await supabaseAdmin
     .from('locations')
     .update(updateData)
@@ -127,8 +164,11 @@ export async function updateLocation(
     .single();
 
   if (error) {
-    if (error.message.includes('depth')) {
+    if (error.code === '23514' || error.message.includes('depth')) {
       throw new AppError(400, 'Maximum location depth (3 levels) exceeded', 'DEPTH_EXCEEDED');
+    }
+    if (error.code === '23503' || error.message.includes('foreign key')) {
+      throw new AppError(400, 'The selected parent location is invalid', 'INVALID_PARENT');
     }
     if (error.code === 'PGRST116') {
       throw new AppError(404, 'Location not found', 'NOT_FOUND');
@@ -141,16 +181,19 @@ export async function updateLocation(
 }
 
 export async function deleteLocation(locationId: string, householdId: string) {
-  const { error } = await supabaseAdmin
+  const { data, error } = await supabaseAdmin
     .from('locations')
     .delete()
     .eq('id', locationId)
-    .eq('household_id', householdId);
+    .eq('household_id', householdId)
+    .select('id')
+    .maybeSingle();
 
   if (error) {
     logger.error({ error: error.message }, 'Failed to delete location');
     throw new AppError(500, 'Failed to delete location', 'INTERNAL_ERROR');
   }
+  if (!data) throw new AppError(404, 'Location not found', 'NOT_FOUND');
 
   return { deleted: true, id: locationId };
 }

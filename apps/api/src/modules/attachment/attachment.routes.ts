@@ -1,8 +1,10 @@
 import { Router, type IRouter } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { linkAttachmentSchema } from '@leonorevault/shared';
 import { validate } from '../../middleware/validate.js';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
+import { AppError } from '../../middleware/errorHandler.js';
 import * as ctrl from './attachment.controller.js';
 
 // ─── Multer Config ──────────────────────────────────────────
@@ -32,6 +34,20 @@ const upload = multer({
   },
 });
 
+function handleUploadError(error: unknown, _req: Request, _res: Response, next: NextFunction) {
+  if (error) {
+    next(
+      new AppError(
+        400,
+        error instanceof Error ? error.message : 'Invalid upload',
+        'UPLOAD_VALIDATION_ERROR',
+      ),
+    );
+    return;
+  }
+  next();
+}
+
 // ─── Routes ─────────────────────────────────────────────────
 
 /**
@@ -46,6 +62,7 @@ attachmentRouter.post(
   '/upload',
   requireRole(['admin', 'member'], 'householdId'),
   upload.array('files', MAX_FILES),
+  handleUploadError,
   ctrl.uploadFiles,
 );
 

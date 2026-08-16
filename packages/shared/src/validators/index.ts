@@ -31,11 +31,13 @@ export {
   createItemSchema,
   updateItemSchema,
   updateItemStatusSchema,
+  returnItemSchema,
   itemListQuerySchema,
   type ItemSchema,
   type CreateItemSchema,
   type UpdateItemSchema,
   type UpdateItemStatusSchema,
+  type ReturnItemSchema,
   type ItemListQuerySchema,
 } from './item.schema.js';
 
@@ -58,10 +60,22 @@ export {
 } from './location.schema.js';
 
 export {
+  storageSpotTypeSchema,
+  createStorageSpotSchema,
+  updateStorageSpotSchema,
+  type CreateStorageSpotSchema,
+  type UpdateStorageSpotSchema,
+} from './storage-spot.schema.js';
+
+export {
   googleCallbackSchema,
   refreshTokenSchema,
+  registerSchema,
+  loginSchema,
   type GoogleCallbackSchema,
   type RefreshTokenSchema,
+  type RegisterSchema,
+  type LoginSchema,
 } from './auth.schema.js';
 
 export {
@@ -70,3 +84,14 @@ export {
   type AttachmentSchema,
   type LinkAttachmentSchema,
 } from './attachment.schema.js';
+
+export { qrTokenSchema, qrResolveQuerySchema, type QrResolveQuerySchema } from './qr.schema.js';
+
+export {
+  notificationListQuerySchema,
+  notificationIdParamSchema,
+  notificationPreferenceSchema,
+  type NotificationListQuerySchema,
+  type NotificationIdParamSchema,
+  type NotificationPreferenceSchema,
+} from './notification.schema.js';

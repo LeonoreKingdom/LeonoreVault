@@ -1,23 +1,18 @@
 'use client';
 
 import { create } from 'zustand';
-import { createClient } from '@/lib/supabase';
-import type { User } from '@supabase/supabase-js';
+import {
+  mockGetSession,
+  mockSignIn,
+  mockSignInWithEmail,
+  mockSignUp,
+  mockSignOut,
+  type MockAuthUser,
+  type MockMembership,
+} from '@/lib/mock-service';
 
-interface AuthUser {
-  id: string;
-  email: string;
-  displayName: string | null;
-  avatarUrl: string | null;
-}
-
-interface Membership {
-  id: string;
-  userId: string;
-  householdId: string;
-  role: 'admin' | 'member' | 'viewer';
-  joinedAt: string;
-}
+export type AuthUser = MockAuthUser;
+export type Membership = MockMembership;
 
 interface AuthState {
   /** Current authenticated user */
@@ -31,11 +26,15 @@ interface AuthState {
 
   /** Initialize auth state — call on app mount */
   initialize: () => Promise<void>;
-  /** Sign in with Google OAuth */
+  /** Sign in with the local mock provider */
   signInWithGoogle: () => Promise<void>;
+  /** Sign in with local mock credentials */
+  signInWithEmail: (email: string, password: string) => Promise<void>;
+  /** Create an account with local mock credentials */
+  signUpWithEmail: (name: string, email: string, password: string) => Promise<void>;
   /** Sign out and clear state */
   signOut: () => Promise<void>;
-  /** Fetch current user profile from API */
+  /** Fetch current user profile from the local service */
   fetchProfile: () => Promise<void>;
   /** Set user directly (e.g., from callback) */
   setUser: (user: AuthUser | null) => void;
@@ -43,9 +42,19 @@ interface AuthState {
   setMembership: (membership: Membership | null) => void;
 }
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
+function applySession(
+  set: (state: Partial<AuthState>) => void,
+  session: Awaited<ReturnType<typeof mockGetSession>>,
+) {
+  set({
+    user: session?.user ?? null,
+    membership: session?.membership ?? null,
+    isAuthenticated: Boolean(session),
+    loading: false,
+  });
+}
 
-export const useAuthStore = create<AuthState>((set, get) => ({
+export const useAuthStore = create<AuthState>((set) => ({
   user: null,
   membership: null,
   loading: true,
@@ -53,74 +62,34 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   initialize: async () => {
     try {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-
-      if (session) {
-        // Fetch profile from our API
-        const response = await fetch(`${API_URL}/api/auth/me`, {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        });
-
-        if (response.ok) {
-          const { data } = await response.json();
-          set({
-            user: data.user,
-            membership: data.membership,
-            isAuthenticated: true,
-            loading: false,
-          });
-          return;
-        }
-      }
-
-      set({ user: null, membership: null, isAuthenticated: false, loading: false });
+      applySession(set, await mockGetSession());
     } catch {
       set({ user: null, membership: null, isAuthenticated: false, loading: false });
     }
   },
 
   signInWithGoogle: async () => {
-    const supabase = createClient();
-    await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
-        queryParams: {
-          access_type: 'offline',
-          prompt: 'consent',
-        },
-      },
-    });
+    applySession(set, await mockSignIn());
+  },
+
+  signInWithEmail: async (email, password) => {
+    applySession(set, await mockSignInWithEmail(email, password));
+  },
+
+  signUpWithEmail: async (name, email, password) => {
+    applySession(set, await mockSignUp(name, email, password));
   },
 
   signOut: async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    set({ user: null, membership: null, isAuthenticated: false });
+    await mockSignOut();
+    set({ user: null, membership: null, isAuthenticated: false, loading: false });
   },
 
   fetchProfile: async () => {
-    const supabase = createClient();
-    const { data: { session } } = await supabase.auth.getSession();
-
-    if (!session) return;
-
     try {
-      const response = await fetch(`${API_URL}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-
-      if (response.ok) {
-        const { data } = await response.json();
-        set({
-          user: data.user,
-          membership: data.membership,
-          isAuthenticated: true,
-        });
-      }
+      applySession(set, await mockGetSession());
     } catch {
-      // Silently fail — user stays with current state
+      // Keep the current local identity when the mock service is unavailable.
     }
   },
 

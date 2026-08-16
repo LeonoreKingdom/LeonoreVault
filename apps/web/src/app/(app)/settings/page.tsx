@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState, useEffect, useCallback } from 'react';
 import { useAuthStore } from '@/stores/auth';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
@@ -16,6 +17,7 @@ import {
   Shield,
   Eye,
   LogOut,
+  ExternalLink,
 } from 'lucide-react';
 
 // ─── Types ──────────────────────────────────────────────────
@@ -171,6 +173,24 @@ export default function SettingsPage() {
         <h1 className="text-2xl font-bold md:text-3xl">Settings</h1>
         <p className="text-muted mt-1">Manage your household and members</p>
       </div>
+
+      <Link
+        href="/settings/validation"
+        className="border-border bg-surface hover:border-primary/30 hover:bg-hover flex items-center justify-between gap-4 rounded-2xl border p-5 shadow-sm transition-colors"
+      >
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="bg-primary/10 text-primary flex h-10 w-10 shrink-0 items-center justify-center rounded-xl">
+            <Shield size={19} />
+          </div>
+          <div className="min-w-0">
+            <h2 className="font-bold">Migration readiness</h2>
+            <p className="text-muted mt-1 text-sm">
+              Review local checks and the remaining Turso, R2, and WAF deployment gates.
+            </p>
+          </div>
+        </div>
+        <ExternalLink size={18} className="text-muted-light shrink-0" />
+      </Link>
 
       {/* Error */}
       {error && (

@@ -7,10 +7,12 @@ import type { ItemStatus } from '../constants/item-status.js';
 export interface Item {
   id: string;
   household_id: string;
+  qr_token: string;
   name: string;
   description: string | null;
   category_id: string | null;
   location_id: string | null;
+  storage_spot_id: string | null;
   quantity: number;
   tags: string[];
   status: ItemStatus;

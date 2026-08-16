@@ -12,6 +12,16 @@ export const locationRouter: IRouter = Router({ mergeParams: true });
 locationRouter.use(requireAuth);
 
 locationRouter.get('/', requireRole(['admin', 'member', 'viewer'], 'householdId'), ctrl.getTree);
-locationRouter.post('/', requireRole(['admin', 'member'], 'householdId'), validate(createLocationSchema), ctrl.create);
-locationRouter.patch('/:id', requireRole(['admin', 'member'], 'householdId'), validate(updateLocationSchema), ctrl.update);
+locationRouter.post(
+  '/',
+  requireRole(['admin', 'member'], 'householdId'),
+  validate(createLocationSchema),
+  ctrl.create,
+);
+locationRouter.patch(
+  '/:id',
+  requireRole(['admin', 'member'], 'householdId'),
+  validate(updateLocationSchema),
+  ctrl.update,
+);
 locationRouter.delete('/:id', requireRole(['admin'], 'householdId'), ctrl.remove);

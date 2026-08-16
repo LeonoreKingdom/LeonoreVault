@@ -93,6 +93,40 @@ export async function createHousehold(userId: string, payload: CreateHouseholdSc
 }
 
 /**
+ * List the households the current user belongs to, ordered by most recent
+ * membership first.
+ */
+export async function listHouseholds(userId: string) {
+  const { data, error } = await supabaseAdmin
+    .from('memberships')
+    .select(
+      'id, user_id, household_id, role, joined_at, households(id, name, created_by, created_at)',
+    )
+    .eq('user_id', userId)
+    .order('joined_at', { ascending: false });
+
+  if (error) {
+    logger.error({ error: error.message, userId }, 'Failed to list households');
+    throw new AppError(500, 'Failed to list households', 'INTERNAL_ERROR');
+  }
+
+  const households = (data || [])
+    .map((row: Record<string, unknown>) => {
+      const relatedHousehold = Array.isArray(row.households) ? row.households[0] : row.households;
+
+      if (!relatedHousehold || typeof relatedHousehold !== 'object') return null;
+
+      return {
+        household: mapHousehold(relatedHousehold as Record<string, unknown>),
+        membership: mapMembership(row),
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+
+  return { households };
+}
+
+/**
  * Get household details with members list.
  */
 export async function getHousehold(householdId: string, userId: string) {
@@ -288,11 +322,7 @@ export async function changeMemberRole(
 /**
  * Remove a member from a household.
  */
-export async function removeMember(
-  householdId: string,
-  targetUserId: string,
-  adminUserId: string,
-) {
+export async function removeMember(householdId: string, targetUserId: string, adminUserId: string) {
   // Verify admin
   const { data: adminMembership } = await supabaseAdmin
     .from('memberships')

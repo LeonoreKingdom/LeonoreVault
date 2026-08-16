@@ -32,13 +32,12 @@ declare global {
 export async function requireAuth(req: Request, _res: Response, next: NextFunction): Promise<void> {
   try {
     const authHeader = req.headers.authorization;
+    const token = authHeader?.match(/^Bearer\s+(\S+)$/i)?.[1];
 
-    if (!authHeader?.startsWith('Bearer ')) {
-      logger.warn({ headers: req.headers }, 'Auth header missing or invalid');
+    if (!token) {
+      logger.warn('Auth header missing or invalid');
       throw new AppError(401, 'Missing or invalid authorization header', 'UNAUTHORIZED');
     }
-
-    const token = authHeader.slice(7); // Remove "Bearer " prefix
 
     const {
       data: { user },
@@ -53,7 +52,7 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
     // Attach user to request
     req.user = {
       id: user.id,
-      email: user.email!,
+      email: user.email ?? '',
     };
 
     next();
@@ -94,7 +93,15 @@ export function requireRole(requiredRoles: string[], householdIdParam = 'id') {
         .eq('household_id', householdId)
         .single();
 
-      if (error || !membership) {
+      if (error && error.code !== 'PGRST116') {
+        logger.error(
+          { error: error.message, householdId, userId: req.user.id },
+          'Membership lookup failed',
+        );
+        throw new AppError(500, 'Membership lookup failed', 'INTERNAL_ERROR');
+      }
+
+      if (!membership) {
         throw new AppError(403, 'You are not a member of this household', 'FORBIDDEN');
       }
 

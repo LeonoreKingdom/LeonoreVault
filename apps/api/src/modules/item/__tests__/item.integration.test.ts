@@ -150,6 +150,7 @@ describe('Item API Integration', () => {
       expect(res.body.success).toBe(true);
       expect(res.body.data.items).toHaveLength(1);
       expect(res.body.data.items[0].name).toBe('Test Item');
+      expect(res.body.data.items[0].status).toBe('stored');
     });
 
     it('applies search, filters, sorting, and pagination parameters', async () => {

@@ -35,6 +35,7 @@ export async function uploadFiles(req: Request, res: Response, next: NextFunctio
 export async function linkExternal(req: Request, res: Response, next: NextFunction) {
   try {
     const result = await svc.linkExternalAttachment(
+      param(req, 'householdId'),
       param(req, 'itemId'),
       req.user!.id,
       req.body as LinkAttachmentSchema,
@@ -48,7 +49,7 @@ export async function linkExternal(req: Request, res: Response, next: NextFuncti
 /** GET /api/households/:householdId/items/:itemId/attachments */
 export async function listAttachments(req: Request, res: Response, next: NextFunction) {
   try {
-    const result = await svc.getAttachments(param(req, 'itemId'));
+    const result = await svc.getAttachments(param(req, 'itemId'), param(req, 'householdId'));
     res.json({ success: true, data: result });
   } catch (err) {
     next(err);
@@ -58,7 +59,10 @@ export async function listAttachments(req: Request, res: Response, next: NextFun
 /** DELETE /api/households/:householdId/items/:itemId/attachments/:attachmentId */
 export async function deleteAttachment(req: Request, res: Response, next: NextFunction) {
   try {
-    const result = await svc.removeAttachment(param(req, 'attachmentId'));
+    const result = await svc.removeAttachment(
+      param(req, 'attachmentId'),
+      param(req, 'householdId'),
+    );
     res.json({ success: true, data: result });
   } catch (err) {
     next(err);

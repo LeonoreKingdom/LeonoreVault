@@ -18,23 +18,34 @@ export const supabaseAdmin: SupabaseClient<Database> = createClient<Database>(
 );
 
 /**
+ * Public Supabase client used for anonymous email/password auth operations.
+ * It deliberately does not persist a server-side session.
+ */
+export const supabaseAuth: SupabaseClient<Database> = createClient<Database>(
+  env.NEXT_PUBLIC_SUPABASE_URL,
+  env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  },
+);
+
+/**
  * Creates a Supabase client scoped to a specific user's JWT.
  * Respects RLS policies — use for user-facing operations.
  *
  * @param accessToken - The user's Supabase access token from the Authorization header
  */
 export function createUserClient(accessToken: string): SupabaseClient<Database> {
-  return createClient<Database>(
-    env.NEXT_PUBLIC_SUPABASE_URL,
-    env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    {
-      global: {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      },
-      auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-      },
+  return createClient<Database>(env.NEXT_PUBLIC_SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY, {
+    global: {
+      headers: { Authorization: `Bearer ${accessToken}` },
     },
-  );
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
 }

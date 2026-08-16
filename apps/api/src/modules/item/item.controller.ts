@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import type {
   CreateItemSchema,
+  ReturnItemSchema,
   UpdateItemSchema,
   UpdateItemStatusSchema,
   ItemListQuerySchema,
@@ -45,6 +46,16 @@ export async function getById(req: Request, res: Response, next: NextFunction) {
   }
 }
 
+/** GET /api/households/:householdId/items/:id/activities */
+export async function activities(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await svc.getItemActivities(param(req, 'id'), param(req, 'householdId'));
+    res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
 /** POST /api/households/:householdId/items */
 export async function create(req: Request, res: Response, next: NextFunction) {
   try {
@@ -65,6 +76,7 @@ export async function update(req: Request, res: Response, next: NextFunction) {
     const result = await svc.updateItem(
       param(req, 'id'),
       param(req, 'householdId'),
+      req.user!.id,
       req.body as UpdateItemSchema,
     );
     res.json({ success: true, data: result });
@@ -79,7 +91,23 @@ export async function updateStatus(req: Request, res: Response, next: NextFuncti
     const result = await svc.updateItemStatus(
       param(req, 'id'),
       param(req, 'householdId'),
+      req.user!.id,
       req.body as UpdateItemStatusSchema,
+    );
+    res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/** POST /api/households/:householdId/items/:id/return */
+export async function returnItem(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await svc.returnItem(
+      param(req, 'id'),
+      param(req, 'householdId'),
+      req.user!.id,
+      req.body as ReturnItemSchema,
     );
     res.json({ success: true, data: result });
   } catch (err) {
@@ -90,7 +118,11 @@ export async function updateStatus(req: Request, res: Response, next: NextFuncti
 /** DELETE /api/households/:householdId/items/:id */
 export async function softDelete(req: Request, res: Response, next: NextFunction) {
   try {
-    const result = await svc.softDeleteItem(param(req, 'id'), param(req, 'householdId'));
+    const result = await svc.softDeleteItem(
+      param(req, 'id'),
+      param(req, 'householdId'),
+      req.user!.id,
+    );
     res.json({ success: true, data: result });
   } catch (err) {
     next(err);
@@ -100,7 +132,7 @@ export async function softDelete(req: Request, res: Response, next: NextFunction
 /** POST /api/households/:householdId/items/:id/restore */
 export async function restore(req: Request, res: Response, next: NextFunction) {
   try {
-    const result = await svc.restoreItem(param(req, 'id'), param(req, 'householdId'));
+    const result = await svc.restoreItem(param(req, 'id'), param(req, 'householdId'), req.user!.id);
     res.json({ success: true, data: result });
   } catch (err) {
     next(err);

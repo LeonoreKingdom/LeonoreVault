@@ -13,6 +13,9 @@ export const householdRouter: IRouter = Router();
 // All household routes require authentication
 householdRouter.use(requireAuth);
 
+// GET /api/households — List households for the current user
+householdRouter.get('/', ctrl.list);
+
 // POST /api/households — Create a new household
 householdRouter.post('/', validate(createHouseholdSchema), ctrl.create);
 
@@ -26,11 +29,7 @@ householdRouter.get('/:id', ctrl.getById);
 householdRouter.post('/:id/invite', ctrl.invite);
 
 // PATCH /api/households/:id/members/:userId — Change role
-householdRouter.patch(
-  '/:id/members/:userId',
-  validate(updateMemberRoleSchema),
-  ctrl.changeRole,
-);
+householdRouter.patch('/:id/members/:userId', validate(updateMemberRoleSchema), ctrl.changeRole);
 
 // DELETE /api/households/:id/members/:userId — Remove member
 householdRouter.delete('/:id/members/:userId', ctrl.remove);

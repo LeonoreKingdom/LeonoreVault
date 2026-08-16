@@ -1,4 +1,6 @@
 import { Router, type IRouter } from 'express';
+import { qrResolveQuerySchema } from '@leonorevault/shared';
+import { validate } from '../../middleware/validate.js';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
 import * as ctrl from './qr.controller.js';
 
@@ -17,8 +19,15 @@ qrRouter.get(
 );
 
 // POST batch PDF with QR labels
-qrRouter.post(
-  '/qr-batch',
-  requireRole(['admin', 'member'], 'householdId'),
-  ctrl.generateBatchPdf,
+qrRouter.post('/qr-batch', requireRole(['admin', 'member'], 'householdId'), ctrl.generateBatchPdf);
+
+/** QR resolution routes mounted at /api/households/:householdId/qr. */
+export const qrResolveRouter: IRouter = Router({ mergeParams: true });
+
+qrResolveRouter.use(requireAuth);
+qrResolveRouter.get(
+  '/resolve',
+  requireRole(['admin', 'member', 'viewer'], 'householdId'),
+  validate(qrResolveQuerySchema, 'query'),
+  ctrl.resolve,
 );

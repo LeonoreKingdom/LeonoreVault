@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowUpRight,
   CheckCircle2,
@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth';
+import { apiGet } from '@/lib/api';
+import type { MockItem } from '@/lib/mock-service';
 
 type ItemStatus = 'in-storage' | 'checked-out';
 
@@ -33,80 +35,101 @@ type InventoryItem = {
 
 type Filter = 'All items' | 'In storage' | 'Checked out' | 'Returned recently';
 
-const mockItems: InventoryItem[] = [
-  {
-    id: 'cordless-drill',
-    name: 'Cordless drill',
-    category: 'Tools',
-    location: 'Garage shelf A',
-    status: 'in-storage',
-    recentlyReturned: 'Returned 2h ago',
-  },
-  {
-    id: 'first-aid-kit',
-    name: 'First aid kit',
-    category: 'Health',
-    location: 'Hallway cabinet',
-    status: 'checked-out',
-    borrowedBy: 'Maya',
-    dueLabel: 'Due tomorrow',
-  },
-  {
-    id: 'camping-lantern',
-    name: 'Camping lantern',
-    category: 'Outdoor',
-    location: 'Storage room',
-    status: 'in-storage',
-    recentlyReturned: 'Returned yesterday',
-  },
-  {
-    id: 'passport-folder',
-    name: 'Passport folder',
-    category: 'Documents',
-    location: 'Office drawer',
-    status: 'in-storage',
-  },
-  {
-    id: 'camera-tripod',
-    name: 'Camera tripod',
-    category: 'Electronics',
-    location: 'Media cabinet',
-    status: 'in-storage',
-  },
-  {
-    id: 'board-games',
-    name: 'Board games',
-    category: 'Entertainment',
-    location: 'Living room shelf',
-    status: 'checked-out',
-    borrowedBy: 'Rafi',
-    dueLabel: 'Due in 3 days',
-  },
-];
+const categoryLabels: Record<string, string> = {
+  tools: 'Tools',
+  health: 'Health',
+  outdoor: 'Outdoor',
+  documents: 'Documents',
+};
 
-const storageSpots = [
-  { name: 'Garage shelf A', type: 'Shelf', itemCount: 8, color: 'bg-primary' },
-  { name: 'Hallway cabinet', type: 'Cabinet', itemCount: 5, color: 'bg-accent' },
-  { name: 'Storage room', type: 'Room', itemCount: 12, color: 'bg-success' },
-  { name: 'Office drawer', type: 'Drawer', itemCount: 4, color: 'bg-warning' },
+const locationLabels: Record<string, string> = {
+  'garage-shelf-a': 'Garage shelf A',
+  'hallway-cabinet': 'Hallway cabinet',
+  'storage-room': 'Storage room',
+  'office-drawer': 'Office drawer',
+};
+
+const storageSpotDefinitions = [
+  { name: 'Garage shelf A', type: 'Shelf', color: 'bg-primary' },
+  { name: 'Hallway cabinet', type: 'Cabinet', color: 'bg-accent' },
+  { name: 'Storage room', type: 'Room', color: 'bg-success' },
+  { name: 'Office drawer', type: 'Drawer', color: 'bg-warning' },
 ];
 
 const filters: Filter[] = ['All items', 'In storage', 'Checked out', 'Returned recently'];
-const locationOptions = [
-  'All locations',
-  ...Array.from(new Set(mockItems.map((item) => item.location))),
-];
+
+function dueLabel(isoDate: string | null): string | undefined {
+  if (!isoDate) return undefined;
+  const difference = new Date(isoDate).getTime() - Date.now();
+  if (difference < 0) return 'Overdue';
+  const days = Math.max(1, Math.ceil(difference / 86_400_000));
+  return days === 1 ? 'Due tomorrow' : `Due in ${days} days`;
+}
+
+function toInventoryItem(item: MockItem): InventoryItem {
+  return {
+    id: item.id,
+    name: item.name,
+    category: categoryLabels[item.categoryId ?? ''] ?? 'Uncategorized',
+    location: locationLabels[item.locationId ?? ''] ?? 'Unassigned',
+    status: item.status === 'borrowed' ? 'checked-out' : 'in-storage',
+    recentlyReturned: item.recentlyReturned,
+    borrowedBy: item.borrowedBy === 'mock-member-maya' ? 'Maya' : item.borrowedBy ?? undefined,
+    dueLabel: dueLabel(item.borrowDueDate),
+  };
+}
 
 export default function DashboardPage() {
-  const { user } = useAuthStore();
+  const { user, membership } = useAuthStore();
+  const [mockItems, setMockItems] = useState<InventoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<Filter>('All items');
   const [locationFilter, setLocationFilter] = useState('All locations');
+
+  useEffect(() => {
+    let cancelled = false;
+    const householdId = membership?.householdId;
+
+    apiGet<{ items: MockItem[] }>(
+      householdId ? `/api/households/${householdId}/items` : '/api/households/casa-leonore/items',
+      { page: '1', limit: '20', sort: 'updated_at', order: 'desc' },
+    )
+      .then((data) => {
+        if (cancelled) return;
+        setMockItems(data.items.map(toInventoryItem));
+        setError(null);
+      })
+      .catch((requestError: unknown) => {
+        if (cancelled) return;
+        setError(requestError instanceof Error ? requestError.message : 'Failed to load inventory');
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [membership?.householdId]);
 
   const firstName = user?.displayName?.split(' ')[0] || 'there';
   const storedCount = mockItems.filter((item) => item.status === 'in-storage').length;
   const checkedOutCount = mockItems.filter((item) => item.status === 'checked-out').length;
   const returnedCount = mockItems.filter((item) => item.recentlyReturned).length;
+  const locationOptions = useMemo(
+    () => ['All locations', ...Array.from(new Set(mockItems.map((item) => item.location)))],
+    [mockItems],
+  );
+  const storageSpots = useMemo(
+    () =>
+      storageSpotDefinitions.map((spot) => ({
+        ...spot,
+        itemCount: mockItems.filter((item) => item.location === spot.name).length,
+      })),
+    [mockItems],
+  );
 
   const visibleItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -128,7 +151,7 @@ export default function DashboardPage() {
 
       return matchesQuery && matchesFilter && matchesLocation;
     });
-  }, [activeFilter, locationFilter, query]);
+  }, [activeFilter, locationFilter, mockItems, query]);
 
   return (
     <div className="space-y-8">
@@ -265,7 +288,16 @@ export default function DashboardPage() {
           </div>
 
           <div className="border-border bg-surface divide-border divide-y overflow-hidden rounded-2xl border shadow-sm">
-            {visibleItems.length > 0 ? (
+            {loading ? (
+              <div className="text-muted flex items-center justify-center px-6 py-14 text-sm">
+                Loading inventory…
+              </div>
+            ) : error ? (
+              <div className="text-danger flex flex-col items-center px-6 py-14 text-center">
+                <h3 className="font-semibold">Inventory unavailable</h3>
+                <p className="text-muted mt-1 max-w-xs text-sm">{error}</p>
+              </div>
+            ) : visibleItems.length > 0 ? (
               visibleItems.map((item) => <InventoryRow key={item.id} item={item} />)
             ) : (
               <div className="flex flex-col items-center px-6 py-14 text-center">

@@ -1,6 +1,71 @@
 import QRCode from 'qrcode';
 import { jsPDF } from 'jspdf';
 import { supabaseAdmin } from '../../config/supabase.js';
+import { AppError } from '../../middleware/errorHandler.js';
+
+function mapResolvedItem(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    qrToken: row.qr_token,
+    name: row.name,
+    description: row.description ?? null,
+    categoryId: row.category_id ?? null,
+    locationId: row.location_id ?? null,
+    storageSpotId: row.storage_spot_id ?? null,
+    quantity: row.quantity,
+    tags: row.tags ?? [],
+    status: row.status,
+    borrowedBy: row.borrowed_by ?? null,
+    borrowDueDate: row.borrow_due_date ?? null,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapResolvedSpot(row: Record<string, unknown>) {
+  return {
+    id: row.id,
+    qrToken: row.qr_token,
+    name: row.name,
+    parentId: row.parent_id ?? null,
+    spotType: row.spot_type,
+    description: row.description ?? null,
+    capacity: row.capacity,
+    sortOrder: row.sort_order,
+    updatedAt: row.updated_at,
+  };
+}
+
+/** Resolve an opaque QR token to a household-scoped item or storage spot. */
+export async function resolveQrToken(householdId: string, token: string) {
+  const [{ data: item, error: itemError }, { data: spot, error: spotError }] = await Promise.all([
+    supabaseAdmin
+      .from('items')
+      .select(
+        'id,qr_token,name,description,category_id,location_id,storage_spot_id,quantity,tags,status,borrowed_by,borrow_due_date,updated_at',
+      )
+      .eq('household_id', householdId)
+      .eq('qr_token', token)
+      .is('deleted_at', null)
+      .maybeSingle(),
+    supabaseAdmin
+      .from('storage_spots')
+      .select('id,qr_token,name,parent_id,spot_type,description,capacity,sort_order,updated_at')
+      .eq('household_id', householdId)
+      .eq('qr_token', token)
+      .maybeSingle(),
+  ]);
+
+  if (itemError || spotError) {
+    throw new AppError(500, 'Failed to resolve QR token', 'INTERNAL_ERROR');
+  }
+  if (item && spot) {
+    throw new AppError(409, 'QR token matches more than one resource', 'QR_TOKEN_AMBIGUOUS');
+  }
+  if (item) return { type: 'item' as const, item: mapResolvedItem(item) };
+  if (spot) return { type: 'spot' as const, storageSpot: mapResolvedSpot(spot) };
+
+  throw new AppError(404, 'QR token not found', 'QR_NOT_FOUND');
+}
 
 // ─── Config ─────────────────────────────────────────────────
 

@@ -11,6 +11,7 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   CORS_ORIGIN: z.string().url().default('http://localhost:3000'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
+  OVERDUE_REMINDER_INTERVAL_MS: z.coerce.number().int().min(60_000).default(900_000),
 
   // ─── Supabase ───────────────────────────────────────────
   NEXT_PUBLIC_SUPABASE_URL: z.string().url(),

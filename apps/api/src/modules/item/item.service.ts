@@ -1,13 +1,23 @@
 import type {
   CreateItemSchema,
+  ReturnItemSchema,
   UpdateItemSchema,
   UpdateItemStatusSchema,
   ItemListQuerySchema,
 } from '@leonorevault/shared';
-import { STATUS_TRANSITIONS, type ItemStatus } from '@leonorevault/shared';
+import {
+  STATUS_TRANSITIONS,
+  type ActivityAction,
+  type ItemStatus,
+  type Json,
+} from '@leonorevault/shared';
 import { supabaseAdmin } from '../../config/supabase.js';
 import { AppError } from '../../middleware/errorHandler.js';
 import { logger } from '../../middleware/logger.js';
+import {
+  clearOverdueNotifications,
+  createItemReturnedNotifications,
+} from '../notification/notification.service.js';
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -15,10 +25,12 @@ function mapItem(row: Record<string, unknown>) {
   return {
     id: row.id,
     householdId: row.household_id,
+    qrToken: row.qr_token ?? null,
     name: row.name,
     description: row.description ?? null,
     categoryId: row.category_id ?? null,
     locationId: row.location_id ?? null,
+    storageSpotId: row.storage_spot_id ?? null,
     quantity: row.quantity,
     tags: row.tags ?? [],
     status: row.status,
@@ -29,6 +41,129 @@ function mapItem(row: Record<string, unknown>) {
     updatedAt: row.updated_at,
     deletedAt: row.deleted_at ?? null,
   };
+}
+
+function mapActivity(row: Record<string, unknown>) {
+  const rawUser = row.user;
+  const user =
+    Array.isArray(rawUser) && rawUser.length > 0
+      ? rawUser[0]
+      : rawUser && typeof rawUser === 'object'
+        ? rawUser
+        : null;
+
+  return {
+    id: row.id,
+    itemId: row.item_id,
+    userId: row.user_id,
+    action: row.action,
+    details: row.details ?? null,
+    createdAt: row.created_at,
+    ...(rawUser !== undefined
+      ? {
+          user:
+            user && typeof user === 'object'
+              ? {
+                  displayName: (user as Record<string, unknown>).display_name ?? null,
+                  avatarUrl: (user as Record<string, unknown>).avatar_url ?? null,
+                }
+              : null,
+        }
+      : {}),
+  };
+}
+
+async function recordItemActivity(
+  itemId: string,
+  userId: string,
+  action: ActivityAction,
+  details: Record<string, unknown> | null,
+) {
+  const { error } = await supabaseAdmin.from('item_activities').insert({
+    item_id: itemId,
+    user_id: userId,
+    action,
+    details: details as Json,
+  });
+
+  if (error) {
+    logger.error({ error: error.message, itemId, action }, 'Failed to record item activity');
+  }
+}
+
+async function assertBorrowerInHousehold(borrowerId: string, householdId: string) {
+  const { data, error } = await supabaseAdmin
+    .from('memberships')
+    .select('user_id')
+    .eq('household_id', householdId)
+    .eq('user_id', borrowerId)
+    .maybeSingle();
+
+  if (error) {
+    logger.error({ error: error.message, borrowerId, householdId }, 'Failed to validate borrower');
+    throw new AppError(500, 'Failed to validate borrower', 'INTERNAL_ERROR');
+  }
+  if (!data)
+    throw new AppError(400, 'Borrower is not a member of this household', 'INVALID_BORROWER');
+}
+
+async function createBorrowRecord(
+  itemId: string,
+  householdId: string,
+  borrowedBy: string,
+  dueAt: string | null,
+  note: string | null,
+) {
+  const { data, error } = await supabaseAdmin
+    .from('borrow_records')
+    .insert({
+      item_id: itemId,
+      household_id: householdId,
+      borrowed_by: borrowedBy,
+      due_at: dueAt,
+      note,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    if (error.code === '23505') {
+      throw new AppError(409, 'Item already has an active checkout', 'ALREADY_CHECKED_OUT');
+    }
+    logger.error({ error: error.message, itemId }, 'Failed to create borrow record');
+    throw new AppError(500, 'Failed to create borrow record', 'INTERNAL_ERROR');
+  }
+  return data;
+}
+
+async function deleteBorrowRecord(recordId: string) {
+  const { error } = await supabaseAdmin.from('borrow_records').delete().eq('id', recordId);
+  if (error) logger.error({ error: error.message, recordId }, 'Failed to roll back borrow record');
+}
+
+async function closeActiveBorrowRecord(itemId: string, householdId: string) {
+  const { data, error } = await supabaseAdmin
+    .from('borrow_records')
+    .update({ returned_at: new Date().toISOString() })
+    .eq('item_id', itemId)
+    .eq('household_id', householdId)
+    .is('returned_at', null)
+    .select('id')
+    .maybeSingle();
+
+  if (error) {
+    logger.error({ error: error.message, itemId }, 'Failed to close borrow record');
+    throw new AppError(500, 'Failed to close borrow record', 'INTERNAL_ERROR');
+  }
+  return data?.id as string | undefined;
+}
+
+async function reopenBorrowRecord(recordId: string) {
+  const { error } = await supabaseAdmin
+    .from('borrow_records')
+    .update({ returned_at: null })
+    .eq('id', recordId);
+  if (error) logger.error({ error: error.message, recordId }, 'Failed to roll back return');
 }
 
 // ─── Service Functions ──────────────────────────────────────
@@ -128,7 +263,7 @@ export async function getItemSummary(householdId: string) {
 }
 
 /**
- * Get a single item by ID, including its attachments.
+ * Get a single item by ID, including its attachments and recent activity.
  */
 export async function getItem(itemId: string, householdId: string) {
   const { data, error } = await supabaseAdmin
@@ -139,16 +274,45 @@ export async function getItem(itemId: string, householdId: string) {
     .is('deleted_at', null)
     .single();
 
-  if (error || !data) {
+  if (error) {
+    logger.error({ error: error.message, itemId, householdId }, 'Failed to fetch item');
+    throw new AppError(500, 'Failed to fetch item', 'INTERNAL_ERROR');
+  }
+  if (!data) {
     throw new AppError(404, 'Item not found', 'NOT_FOUND');
   }
 
   // Fetch attachments for this item
-  const { data: attachments } = await supabaseAdmin
+  const { data: attachments, error: attachmentsError } = await supabaseAdmin
     .from('attachments')
     .select('*')
     .eq('item_id', itemId)
     .order('created_at', { ascending: false });
+
+  if (attachmentsError) {
+    logger.error(
+      { error: attachmentsError.message, itemId, householdId },
+      'Failed to fetch item attachments',
+    );
+    throw new AppError(500, 'Failed to fetch item attachments', 'INTERNAL_ERROR');
+  }
+
+  const { data: recentActivity, error: activityError } = await supabaseAdmin
+    .from('item_activities')
+    .select(
+      'id, item_id, user_id, action, details, created_at, user:users(display_name, avatar_url)',
+    )
+    .eq('item_id', itemId)
+    .order('created_at', { ascending: false })
+    .limit(20);
+
+  if (activityError) {
+    logger.error(
+      { error: activityError.message, itemId, householdId },
+      'Failed to fetch item activity history',
+    );
+    throw new AppError(500, 'Failed to fetch item activity history', 'INTERNAL_ERROR');
+  }
 
   return {
     item: mapItem(data),
@@ -163,7 +327,42 @@ export async function getItem(itemId: string, householdId: string) {
       createdBy: a.created_by,
       createdAt: a.created_at,
     })),
+    recentActivity: (recentActivity || []).map((activity) =>
+      mapActivity(activity as unknown as Record<string, unknown>),
+    ),
   };
+}
+
+/**
+ * Get the immutable activity history for an item.
+ */
+export async function getItemActivities(itemId: string, householdId: string) {
+  const { data: item, error: itemError } = await supabaseAdmin
+    .from('items')
+    .select('id')
+    .eq('id', itemId)
+    .eq('household_id', householdId)
+    .maybeSingle();
+
+  if (itemError) {
+    logger.error({ error: itemError.message, itemId }, 'Failed to validate item for activities');
+    throw new AppError(500, 'Failed to validate item', 'INTERNAL_ERROR');
+  }
+  if (!item) throw new AppError(404, 'Item not found', 'NOT_FOUND');
+
+  const { data, error } = await supabaseAdmin
+    .from('item_activities')
+    .select('*')
+    .eq('item_id', itemId)
+    .order('created_at', { ascending: false })
+    .limit(100);
+
+  if (error) {
+    logger.error({ error: error.message, itemId }, 'Failed to fetch item activities');
+    throw new AppError(500, 'Failed to fetch item activities', 'INTERNAL_ERROR');
+  }
+
+  return { activities: (data || []).map((row) => mapActivity(row as Record<string, unknown>)) };
 }
 
 /**
@@ -191,13 +390,47 @@ export async function createItem(householdId: string, userId: string, payload: C
     throw new AppError(500, 'Failed to create item', 'INTERNAL_ERROR');
   }
 
+  await recordItemActivity((data as Record<string, unknown>).id as string, userId, 'created', {
+    name: payload.name,
+  });
+
   return { item: mapItem(data) };
+}
+
+/** Return a checked-out item and close its active borrow record. */
+export async function returnItem(
+  itemId: string,
+  householdId: string,
+  userId: string,
+  payload: ReturnItemSchema,
+) {
+  return updateItemStatus(itemId, householdId, userId, {
+    status: 'stored',
+    note: payload.note,
+  });
 }
 
 /**
  * Update an existing item.
  */
-export async function updateItem(itemId: string, householdId: string, payload: UpdateItemSchema) {
+export async function updateItem(
+  itemId: string,
+  householdId: string,
+  userId: string,
+  payload: UpdateItemSchema,
+) {
+  if (
+    payload.status !== undefined ||
+    payload.borrowed_by !== undefined ||
+    payload.borrow_due_date !== undefined
+  ) {
+    throw new AppError(
+      400,
+      'Use the status endpoint for checkout and return operations',
+      'STATUS_ENDPOINT_REQUIRED',
+    );
+  }
+
   const updateData: Record<string, unknown> = {};
   if (payload.name !== undefined) updateData.name = payload.name;
   if (payload.description !== undefined) updateData.description = payload.description;
@@ -226,6 +459,8 @@ export async function updateItem(itemId: string, householdId: string, payload: U
     throw new AppError(500, 'Failed to update item', 'INTERNAL_ERROR');
   }
 
+  await recordItemActivity(itemId, userId, 'updated', { fields: Object.keys(updateData) });
+
   return { item: mapItem(data) };
 }
 
@@ -235,12 +470,13 @@ export async function updateItem(itemId: string, householdId: string, payload: U
 export async function updateItemStatus(
   itemId: string,
   householdId: string,
+  userId: string,
   payload: UpdateItemStatusSchema,
 ) {
   // Get current status
   const { data: current, error: fetchError } = await supabaseAdmin
     .from('items')
-    .select('status')
+    .select('status, name, borrowed_by')
     .eq('id', itemId)
     .eq('household_id', householdId)
     .is('deleted_at', null)
@@ -254,6 +490,10 @@ export async function updateItemStatus(
   const currentStatus = current.status as ItemStatus;
   const newStatus = payload.status as ItemStatus;
 
+  if (currentStatus === 'borrowed' && newStatus === 'borrowed') {
+    throw new AppError(409, 'Item already has an active checkout', 'ALREADY_CHECKED_OUT');
+  }
+
   // Validate transition
   const allowed = STATUS_TRANSITIONS[currentStatus];
   if (!allowed || !allowed.includes(newStatus)) {
@@ -262,6 +502,31 @@ export async function updateItemStatus(
       `Cannot transition from '${currentStatus}' to '${newStatus}'. Allowed: ${(allowed || []).join(', ')}`,
       'INVALID_TRANSITION',
     );
+  }
+
+  if (newStatus === 'borrowed' && !payload.borrowed_by) {
+    throw new AppError(
+      400,
+      'A borrower is required when checking out an item',
+      'BORROWER_REQUIRED',
+    );
+  }
+
+  let borrowRecordId: string | undefined;
+  let closedBorrowRecordId: string | undefined;
+
+  if (newStatus === 'borrowed') {
+    await assertBorrowerInHousehold(payload.borrowed_by!, householdId);
+    const borrowRecord = await createBorrowRecord(
+      itemId,
+      householdId,
+      payload.borrowed_by!,
+      payload.borrow_due_date ?? null,
+      payload.note ?? null,
+    );
+    borrowRecordId = (borrowRecord as Record<string, unknown>).id as string;
+  } else if (currentStatus === 'borrowed') {
+    closedBorrowRecordId = await closeActiveBorrowRecord(itemId, householdId);
   }
 
   // Build update
@@ -293,7 +558,34 @@ export async function updateItemStatus(
       { error: error.message, code: error.code, details: error.details, hint: error.hint },
       'Failed to update item status',
     );
+    if (borrowRecordId) await deleteBorrowRecord(borrowRecordId);
+    if (closedBorrowRecordId) await reopenBorrowRecord(closedBorrowRecordId);
+    if (error.code === 'PGRST116') {
+      throw new AppError(404, 'Item not found', 'NOT_FOUND');
+    }
     throw new AppError(500, 'Failed to update item status', 'INTERNAL_ERROR');
+  }
+
+  await recordItemActivity(itemId, userId, 'status_changed', {
+    oldStatus: currentStatus,
+    newStatus,
+    borrowedBy: payload.borrowed_by ?? null,
+    borrowRecordId: borrowRecordId ?? closedBorrowRecordId ?? null,
+  });
+
+  if (currentStatus === 'borrowed' && newStatus === 'stored') {
+    if (closedBorrowRecordId) {
+      await clearOverdueNotifications(itemId, closedBorrowRecordId);
+    }
+
+    await createItemReturnedNotifications({
+      householdId,
+      itemId,
+      itemName: String((current as Record<string, unknown>).name ?? 'Item'),
+      actorUserId: userId,
+      borrowedBy: ((current as Record<string, unknown>).borrowed_by as string | null) ?? null,
+      note: payload.note ?? null,
+    });
   }
 
   return { item: mapItem(data) };
@@ -302,7 +594,7 @@ export async function updateItemStatus(
 /**
  * Soft-delete an item (sets deleted_at).
  */
-export async function softDeleteItem(itemId: string, householdId: string) {
+export async function softDeleteItem(itemId: string, householdId: string, userId: string) {
   const { error } = await supabaseAdmin
     .from('items')
     .update({ deleted_at: new Date().toISOString() })
@@ -315,13 +607,15 @@ export async function softDeleteItem(itemId: string, householdId: string) {
     throw new AppError(500, 'Failed to delete item', 'INTERNAL_ERROR');
   }
 
+  await recordItemActivity(itemId, userId, 'updated', { deleted: true });
+
   return { deleted: true, id: itemId };
 }
 
 /**
  * Restore a soft-deleted item.
  */
-export async function restoreItem(itemId: string, householdId: string) {
+export async function restoreItem(itemId: string, householdId: string, userId: string) {
   const { data, error } = await supabaseAdmin
     .from('items')
     .update({ deleted_at: null })
@@ -334,6 +628,8 @@ export async function restoreItem(itemId: string, householdId: string) {
   if (error || !data) {
     throw new AppError(404, 'Deleted item not found', 'NOT_FOUND');
   }
+
+  await recordItemActivity(itemId, userId, 'updated', { restored: true });
 
   return { item: mapItem(data) };
 }

@@ -2,12 +2,54 @@
 
 import { useAuthStore } from '@/stores/auth';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
-import { Package } from 'lucide-react';
+import { type FormEvent, useEffect, useState } from 'react';
+import { CheckCircle2, Package } from 'lucide-react';
+
+type SignUpForm = {
+  name: string;
+  email: string;
+  password: string;
+  confirmPassword: string;
+};
+
+type SignInForm = {
+  email: string;
+  password: string;
+};
+
+const initialSignUpForm: SignUpForm = {
+  name: '',
+  email: '',
+  password: '',
+  confirmPassword: '',
+};
+
+const initialSignInForm: SignInForm = {
+  email: '',
+  password: '',
+};
+
+const authInputClass =
+  'border-border bg-surface focus:border-primary focus:ring-primary/20 w-full rounded-xl border px-4 py-3 text-sm outline-none transition-colors focus:ring-2';
 
 export default function LoginPage() {
-  const { signInWithGoogle, isAuthenticated, loading, initialize } = useAuthStore();
+  const {
+    signInWithGoogle,
+    signInWithEmail,
+    signUpWithEmail,
+    isAuthenticated,
+    loading,
+    initialize,
+  } = useAuthStore();
   const router = useRouter();
+  const [showSignup, setShowSignup] = useState(false);
+  const [signInForm, setSignInForm] = useState(initialSignInForm);
+  const [signInError, setSignInError] = useState('');
+  const [signInSubmitted, setSignInSubmitted] = useState(false);
+  const [signUpForm, setSignUpForm] = useState(initialSignUpForm);
+  const [signUpError, setSignUpError] = useState('');
+  const [signUpSubmitted, setSignUpSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     initialize();
@@ -18,6 +60,76 @@ export default function LoginPage() {
       router.replace('/');
     }
   }, [loading, isAuthenticated, router]);
+
+  function updateSignUpField(field: keyof SignUpForm, value: string) {
+    setSignUpForm((current) => ({ ...current, [field]: value }));
+    setSignUpError('');
+    setSignUpSubmitted(false);
+  }
+
+  function updateSignInField(field: keyof SignInForm, value: string) {
+    setSignInForm((current) => ({ ...current, [field]: value }));
+    setSignInError('');
+    setSignInSubmitted(false);
+  }
+
+  async function handleSignIn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!signInForm.email.includes('@')) {
+      setSignInError('Enter a valid email address.');
+      return;
+    }
+    if (signInForm.password.length < 8) {
+      setSignInError('Your password must be at least 8 characters.');
+      return;
+    }
+
+    setSignInError('');
+    setSubmitting(true);
+    try {
+      await signInWithEmail(signInForm.email, signInForm.password);
+      setSignInSubmitted(true);
+    } catch (error) {
+      setSignInError(error instanceof Error ? error.message : 'Unable to sign in');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleSignUp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (signUpForm.password.length < 8) {
+      setSignUpError('Use at least 8 characters for your password.');
+      return;
+    }
+    if (signUpForm.password !== signUpForm.confirmPassword) {
+      setSignUpError('Passwords do not match.');
+      return;
+    }
+
+    setSignUpError('');
+    setSubmitting(true);
+    try {
+      await signUpWithEmail(signUpForm.name, signUpForm.email, signUpForm.password);
+      setSignUpSubmitted(true);
+    } catch (error) {
+      setSignUpError(error instanceof Error ? error.message : 'Unable to create account');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function switchAuthMode(nextMode: 'signin' | 'signup') {
+    setShowSignup(nextMode === 'signup');
+    setSignInForm(initialSignInForm);
+    setSignInError('');
+    setSignInSubmitted(false);
+    setSignUpForm(initialSignUpForm);
+    setSignUpError('');
+    setSignUpSubmitted(false);
+  }
 
   return (
     <div className="flex min-h-screen">
@@ -70,16 +182,97 @@ export default function LoginPage() {
           {/* Heading */}
           <div className="text-center">
             <h2 className="text-2xl font-bold">
-              Welcome to{' '}
+              {showSignup ? 'Create your ' : 'Welcome to '}
               <span className="from-primary to-accent bg-gradient-to-r bg-clip-text text-transparent">
                 LeonoreVault
               </span>
             </h2>
-            <p className="text-muted mt-2">Sign in to manage your household inventory</p>
+            <p className="text-muted mt-2">
+              {showSignup
+                ? 'Set up your household inventory space in a minute.'
+                : 'Sign in to manage your household inventory'}
+            </p>
           </div>
+
+          {!showSignup && (
+            <>
+              {signInSubmitted ? (
+                <div className="bg-success/10 text-success flex items-start gap-3 rounded-2xl px-4 py-3.5 text-sm">
+                  <CheckCircle2 size={19} className="mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-semibold">Sign-in preview ready.</p>
+                    <p className="mt-0.5 opacity-80">
+                      Your local session is ready. Redirecting to your inventory…
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <form onSubmit={handleSignIn} className="space-y-4">
+                  <div>
+                    <label htmlFor="signin-email" className="mb-1.5 block text-sm font-semibold">
+                      Email address
+                    </label>
+                    <input
+                      id="signin-email"
+                      type="email"
+                      required
+                      autoComplete="email"
+                      value={signInForm.email}
+                      onChange={(event) => updateSignInField('email', event.target.value)}
+                      placeholder="you@example.com"
+                      className={authInputClass}
+                    />
+                  </div>
+                  <div>
+                    <div className="mb-1.5 flex items-center justify-between gap-3">
+                      <label htmlFor="signin-password" className="block text-sm font-semibold">
+                        Password
+                      </label>
+                      <button
+                        type="button"
+                        className="text-primary text-xs font-semibold hover:underline"
+                      >
+                        Forgot password?
+                      </button>
+                    </div>
+                    <input
+                      id="signin-password"
+                      type="password"
+                      required
+                      minLength={8}
+                      autoComplete="current-password"
+                      value={signInForm.password}
+                      onChange={(event) => updateSignInField('password', event.target.value)}
+                      placeholder="Enter your password"
+                      className={authInputClass}
+                    />
+                  </div>
+                  {signInError && (
+                    <p role="alert" className="text-danger text-sm">
+                      {signInError}
+                    </p>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="from-primary to-accent w-full rounded-xl bg-gradient-to-r px-5 py-3.5 font-semibold text-white shadow-md transition-opacity hover:opacity-90"
+                  >
+                    {submitting ? 'Signing in…' : 'Sign in'}
+                  </button>
+                </form>
+              )}
+
+              <div className="text-muted-light flex items-center gap-3 text-xs">
+                <span className="bg-border h-px flex-1" />
+                <span>or</span>
+                <span className="bg-border h-px flex-1" />
+              </div>
+            </>
+          )}
 
           {/* Google Sign In */}
           <button
+            type="button"
             onClick={signInWithGoogle}
             disabled={loading}
             id="google-sign-in-button"
@@ -108,6 +301,115 @@ export default function LoginPage() {
               {loading ? 'Loading...' : 'Continue with Google'}
             </span>
           </button>
+
+          {showSignup && (
+            <>
+              {signUpSubmitted ? (
+                <div className="bg-success/10 text-success flex items-start gap-3 rounded-2xl px-4 py-3.5 text-sm">
+                  <CheckCircle2 size={19} className="mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-semibold">Your account preview is ready.</p>
+                    <p className="mt-0.5 opacity-80">
+                      Your local account is ready. Redirecting to your inventory…
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <form onSubmit={handleSignUp} className="space-y-4">
+                  <div>
+                    <label htmlFor="signup-name" className="mb-1.5 block text-sm font-semibold">
+                      Your name
+                    </label>
+                    <input
+                      id="signup-name"
+                      type="text"
+                      required
+                      autoComplete="name"
+                      value={signUpForm.name}
+                      onChange={(event) => updateSignUpField('name', event.target.value)}
+                      placeholder="e.g. Leonore"
+                      className={authInputClass}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="signup-email" className="mb-1.5 block text-sm font-semibold">
+                      Email address
+                    </label>
+                    <input
+                      id="signup-email"
+                      type="email"
+                      required
+                      autoComplete="email"
+                      value={signUpForm.email}
+                      onChange={(event) => updateSignUpField('email', event.target.value)}
+                      placeholder="you@example.com"
+                      className={authInputClass}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="signup-password" className="mb-1.5 block text-sm font-semibold">
+                      Password
+                    </label>
+                    <input
+                      id="signup-password"
+                      type="password"
+                      required
+                      minLength={8}
+                      autoComplete="new-password"
+                      value={signUpForm.password}
+                      onChange={(event) => updateSignUpField('password', event.target.value)}
+                      placeholder="At least 8 characters"
+                      className={authInputClass}
+                    />
+                  </div>
+                  <div>
+                    <label
+                      htmlFor="signup-confirm-password"
+                      className="mb-1.5 block text-sm font-semibold"
+                    >
+                      Confirm password
+                    </label>
+                    <input
+                      id="signup-confirm-password"
+                      type="password"
+                      required
+                      minLength={8}
+                      autoComplete="new-password"
+                      value={signUpForm.confirmPassword}
+                      onChange={(event) => updateSignUpField('confirmPassword', event.target.value)}
+                      placeholder="Repeat your password"
+                      className={authInputClass}
+                    />
+                  </div>
+                  {signUpError && (
+                    <p role="alert" className="text-danger text-sm">
+                      {signUpError}
+                    </p>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="from-primary to-accent w-full rounded-xl bg-gradient-to-r px-5 py-3.5 font-semibold text-white shadow-md transition-opacity hover:opacity-90"
+                  >
+                    {submitting ? 'Creating account…' : 'Create account'}
+                  </button>
+                </form>
+              )}
+            </>
+          )}
+
+          <div className="text-center text-sm">
+            <span className="text-muted">
+              {showSignup ? 'Already have an account?' : 'New to LeonoreVault?'}
+            </span>{' '}
+            <button
+              type="button"
+              onClick={() => switchAuthMode(showSignup ? 'signin' : 'signup')}
+              className="text-primary font-semibold hover:underline"
+            >
+              {showSignup ? 'Sign in' : 'Create an account'}
+            </button>
+          </div>
 
           {/* Terms */}
           <p className="text-muted-light text-center text-xs leading-relaxed">

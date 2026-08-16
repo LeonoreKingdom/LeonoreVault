@@ -17,10 +17,12 @@ const tagsSchema = z
 export const itemSchema = z.object({
   id: uuidSchema,
   household_id: uuidSchema,
+  qr_token: z.string().regex(/^[0-9a-f]{32}$/),
   name: z.string().min(1).max(200),
   description: z.string().max(2000).nullable(),
   category_id: uuidSchema.nullable(),
   location_id: uuidSchema.nullable(),
+  storage_spot_id: uuidSchema.nullable(),
   quantity: z.number().int().min(1),
   tags: tagsSchema,
   status: z.enum(ITEM_STATUSES),
@@ -65,6 +67,12 @@ export const updateItemStatusSchema = z.object({
   status: z.enum(ITEM_STATUSES),
   borrowed_by: uuidSchema.nullable().optional(),
   borrow_due_date: timestampSchema.nullable().optional(),
+  note: z.string().max(1000).nullable().optional(),
+});
+
+/** Payload for returning an item through the dedicated return endpoint. */
+export const returnItemSchema = z.object({
+  note: z.string().max(1000).nullable().optional(),
 });
 
 /** Query parameters for listing items */
@@ -89,4 +97,5 @@ export type ItemSchema = z.infer<typeof itemSchema>;
 export type CreateItemSchema = z.infer<typeof createItemSchema>;
 export type UpdateItemSchema = z.infer<typeof updateItemSchema>;
 export type UpdateItemStatusSchema = z.infer<typeof updateItemStatusSchema>;
+export type ReturnItemSchema = z.infer<typeof returnItemSchema>;
 export type ItemListQuerySchema = z.infer<typeof itemListQuerySchema>;

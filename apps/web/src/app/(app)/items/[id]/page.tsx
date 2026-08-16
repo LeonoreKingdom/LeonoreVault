@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { type FormEvent, useState } from 'react';
 import {
   ArrowLeft,
   ArrowUpRight,
@@ -12,6 +13,7 @@ import {
   MapPin,
   Package,
   QrCode,
+  RotateCcw,
   Tag,
   UserRound,
 } from 'lucide-react';
@@ -31,6 +33,14 @@ type MockItemDetail = {
   note: string;
   borrower?: string;
   dueDate?: string;
+};
+
+type MockActivity = {
+  id: string;
+  kind: 'created' | 'updated' | 'checkout' | 'return';
+  title: string;
+  detail: string;
+  date: string;
 };
 
 const mockItemDetails: MockItemDetail[] = [
@@ -152,10 +162,60 @@ const mockItemDetails: MockItemDetail[] = [
   },
 ];
 
+const mockBorrowers = ['Raka', 'Dimas', 'Maya'];
+
+function buildMockActivity(item: MockItemDetail): MockActivity[] {
+  const events: MockActivity[] = [
+    {
+      id: `${item.id}-updated`,
+      kind: 'updated',
+      title: 'Details updated',
+      detail: 'Item information was refreshed.',
+      date: item.updated,
+    },
+    {
+      id: `${item.id}-created`,
+      kind: 'created',
+      title: 'Added to inventory',
+      detail: `Added by ${item.createdBy}.`,
+      date: item.created,
+    },
+  ];
+
+  if (item.status === 'Checked out' && item.borrower && item.dueDate) {
+    events.splice(1, 0, {
+      id: `${item.id}-checkout`,
+      kind: 'checkout',
+      title: 'Checked out',
+      detail: `Borrowed by ${item.borrower} · due ${item.dueDate}.`,
+      date: item.updated,
+    });
+  }
+
+  return events;
+}
+
+function formatDueDate(value: string) {
+  return new Intl.DateTimeFormat('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date(`${value}T00:00:00`));
+}
+
 export default function ItemDetailPage() {
   const params = useParams();
   const itemId = String(params.id);
-  const item = mockItemDetails.find((entry) => entry.id === itemId);
+  const initialItem = mockItemDetails.find((entry) => entry.id === itemId);
+  const [item, setItem] = useState(initialItem);
+  const [activity, setActivity] = useState<MockActivity[]>(() =>
+    initialItem ? buildMockActivity(initialItem) : [],
+  );
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [checkoutSaved, setCheckoutSaved] = useState(false);
+  const [returnSaved, setReturnSaved] = useState(false);
+  const [borrower, setBorrower] = useState(mockBorrowers[0]);
+  const [dueDate, setDueDate] = useState('2026-08-23');
 
   if (!item) {
     return (
@@ -178,6 +238,60 @@ export default function ItemDetailPage() {
     'Checked out': 'bg-primary/10 text-primary',
     'Needs a home': 'bg-warning/10 text-warning',
   }[item.status];
+
+  function handleCheckout(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setItem((current) =>
+      current
+        ? {
+            ...current,
+            status: 'Checked out',
+            borrower,
+            dueDate: formatDueDate(dueDate),
+            updated: 'Just now',
+          }
+        : current,
+    );
+    setActivity((current) => [
+      {
+        id: `${itemId}-checkout-${Date.now()}`,
+        kind: 'checkout',
+        title: 'Checked out',
+        detail: `Borrowed by ${borrower} · due ${formatDueDate(dueDate)}.`,
+        date: 'Just now',
+      },
+      ...current,
+    ]);
+    setCheckoutOpen(false);
+    setCheckoutSaved(true);
+    setReturnSaved(false);
+  }
+
+  function handleReturn() {
+    setItem((current) =>
+      current
+        ? {
+            ...current,
+            status: 'Stored',
+            borrower: undefined,
+            dueDate: undefined,
+            updated: 'Just now',
+          }
+        : current,
+    );
+    setActivity((current) => [
+      {
+        id: `${itemId}-return-${Date.now()}`,
+        kind: 'return',
+        title: 'Returned to storage',
+        detail: `Marked returned by you and placed back in ${item?.location ?? 'storage'}.`,
+        date: 'Just now',
+      },
+      ...current,
+    ]);
+    setReturnSaved(true);
+    setCheckoutSaved(false);
+  }
 
   return (
     <div className="space-y-8">
@@ -322,14 +436,11 @@ export default function ItemDetailPage() {
                 <h2 id="activity-heading" className="font-bold">
                   Activity
                 </h2>
-                <p className="text-muted mt-0.5 text-sm">A short history of this item.</p>
+                <p className="text-muted mt-0.5 text-sm">A timeline of this item’s story.</p>
               </div>
               <ArrowUpRight size={17} className="text-muted-light" />
             </div>
-            <div className="space-y-4">
-              <ActivityRow label="Last updated" value={item.updated} />
-              <ActivityRow label="Added to inventory" value={item.created} />
-            </div>
+            <ActivityTimeline events={activity} />
           </section>
 
           <section
@@ -344,11 +455,101 @@ export default function ItemDetailPage() {
                 {item.status}
               </span>
             </div>
+            {checkoutSaved && (
+              <div className="bg-success/10 text-success mb-4 rounded-xl px-3 py-2.5 text-sm">
+                Checkout saved in this preview. The item is now marked as checked out.
+              </div>
+            )}
+            {returnSaved && (
+              <div className="bg-success/10 text-success mb-4 rounded-xl px-3 py-2.5 text-sm">
+                Return saved in this preview. The item is back in storage.
+              </div>
+            )}
             {item.status === 'Checked out' && item.borrower && item.dueDate ? (
               <div className="bg-primary/5 space-y-3 rounded-xl p-3">
                 <DetailRow icon={<UserRound size={15} />} label="With" value={item.borrower} />
                 <DetailRow icon={<CalendarDays size={15} />} label="Due" value={item.dueDate} />
+                <button
+                  type="button"
+                  onClick={handleReturn}
+                  className="border-primary/30 text-primary hover:bg-primary/10 inline-flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors"
+                >
+                  <RotateCcw size={15} />
+                  Mark as returned
+                </button>
               </div>
+            ) : item.status === 'Stored' ? (
+              checkoutOpen ? (
+                <form onSubmit={handleCheckout} className="bg-primary/5 space-y-4 rounded-xl p-3">
+                  <div>
+                    <h3 className="text-sm font-bold">Check out this item</h3>
+                    <p className="text-muted mt-0.5 text-xs">
+                      Record who has it and when it should come home.
+                    </p>
+                  </div>
+                  <div>
+                    <label htmlFor="borrower" className="mb-1.5 block text-xs font-semibold">
+                      Borrowed by
+                    </label>
+                    <select
+                      id="borrower"
+                      value={borrower}
+                      onChange={(event) => setBorrower(event.target.value)}
+                      className="border-border bg-surface focus:border-primary focus:ring-primary/20 w-full rounded-xl border px-3 py-2.5 text-sm outline-none focus:ring-2"
+                    >
+                      {mockBorrowers.map((name) => (
+                        <option key={name}>{name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="due-date" className="mb-1.5 block text-xs font-semibold">
+                      Due date
+                    </label>
+                    <input
+                      id="due-date"
+                      type="date"
+                      required
+                      value={dueDate}
+                      onChange={(event) => setDueDate(event.target.value)}
+                      className="border-border bg-surface focus:border-primary focus:ring-primary/20 w-full rounded-xl border px-3 py-2.5 text-sm outline-none focus:ring-2"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCheckoutOpen(false)}
+                      className="border-border hover:bg-hover flex-1 rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="from-primary to-accent flex-1 rounded-xl bg-gradient-to-r px-3 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
+                    >
+                      Confirm checkout
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div className="bg-success/5 rounded-xl p-3">
+                  <div className="text-muted flex items-start gap-2 text-sm leading-relaxed">
+                    <CheckCircle2 size={16} className="text-success mt-0.5 shrink-0" />
+                    <span>This item is stored and ready to find.</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCheckoutOpen(true);
+                      setCheckoutSaved(false);
+                      setReturnSaved(false);
+                    }}
+                    className="from-primary to-accent mt-4 w-full rounded-xl bg-gradient-to-r px-3 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
+                  >
+                    Check out item
+                  </button>
+                </div>
+              )
             ) : item.status === 'Needs a home' ? (
               <div className="bg-warning/5 text-muted rounded-xl p-3 text-sm leading-relaxed">
                 Assign a storage spot so everyone can find this item next time.
@@ -400,13 +601,44 @@ function DetailRow({
   );
 }
 
-function ActivityRow({ label, value }: { label: string; value: string }) {
+function ActivityTimeline({ events }: { events: MockActivity[] }) {
   return (
-    <div className="flex items-start gap-3">
-      <span className="bg-hover mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full" />
-      <div className="min-w-0">
-        <p className="text-muted text-xs">{label}</p>
-        <p className="mt-0.5 text-sm font-semibold">{value}</p>
+    <div className="space-y-0">
+      {events.map((event, index) => (
+        <ActivityEvent key={event.id} event={event} isLast={index === events.length - 1} />
+      ))}
+    </div>
+  );
+}
+
+function ActivityEvent({ event, isLast }: { event: MockActivity; isLast: boolean }) {
+  const tone = {
+    created: 'bg-primary/10 text-primary',
+    updated: 'bg-hover text-muted',
+    checkout: 'bg-warning/10 text-warning',
+    return: 'bg-success/10 text-success',
+  }[event.kind];
+  const Icon = {
+    created: Package,
+    updated: Edit3,
+    checkout: UserRound,
+    return: RotateCcw,
+  }[event.kind];
+
+  return (
+    <div className="flex gap-3">
+      <div className="flex w-8 shrink-0 flex-col items-center">
+        <div className={`flex h-8 w-8 items-center justify-center rounded-xl ${tone}`}>
+          <Icon size={15} />
+        </div>
+        {!isLast && <div className="bg-border my-1 h-full w-px" />}
+      </div>
+      <div className={`min-w-0 flex-1 ${isLast ? 'pb-0' : 'pb-5'}`}>
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-sm font-semibold">{event.title}</p>
+          <span className="text-muted shrink-0 text-xs">{event.date}</span>
+        </div>
+        <p className="text-muted mt-1 text-xs leading-relaxed">{event.detail}</p>
       </div>
     </div>
   );

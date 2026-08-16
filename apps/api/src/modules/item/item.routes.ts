@@ -3,6 +3,7 @@ import {
   createItemSchema,
   updateItemSchema,
   updateItemStatusSchema,
+  returnItemSchema,
   itemListQuerySchema,
 } from '@leonorevault/shared';
 import { validate } from '../../middleware/validate.js';
@@ -30,6 +31,13 @@ itemRouter.get('/summary', requireRole(['admin', 'member', 'viewer'], 'household
 // GET single item
 itemRouter.get('/:id', requireRole(['admin', 'member', 'viewer'], 'householdId'), ctrl.getById);
 
+// GET immutable activity history for one item
+itemRouter.get(
+  '/:id/activities',
+  requireRole(['admin', 'member', 'viewer'], 'householdId'),
+  ctrl.activities,
+);
+
 // POST create — admin + member
 itemRouter.post(
   '/',
@@ -52,6 +60,14 @@ itemRouter.patch(
   requireRole(['admin', 'member'], 'householdId'),
   validate(updateItemStatusSchema),
   ctrl.updateStatus,
+);
+
+// POST return — admin + member
+itemRouter.post(
+  '/:id/return',
+  requireRole(['admin', 'member'], 'householdId'),
+  validate(returnItemSchema),
+  ctrl.returnItem,
 );
 
 // DELETE (soft) — admin + member
