@@ -2,7 +2,7 @@
 
 import { create } from 'zustand';
 import { apiGet, apiPost, apiPatch, apiDelete } from '@/lib/api';
-import { db, isFresh, markSynced, type DbItem } from '@/lib/db';
+import { db, markSynced, type DbItem } from '@/lib/db';
 import type {
   CreateItemSchema,
   UpdateItemSchema,
@@ -14,6 +14,7 @@ import type {
 export interface Item {
   id: string;
   householdId: string;
+  qrToken?: string | null;
   name: string;
   description: string | null;
   categoryId: string | null;
@@ -165,8 +166,9 @@ export const useItemsStore = create<ItemsState>((set, get) => ({
     }
 
     // ── Phase 2: Background fetch from API ──────────────
-    const fresh = await isFresh('items', householdId).catch(() => false);
-    if (fresh) return; // Cache is still fresh, skip API call
+    // Turso-backed API data is the source of truth while online. Dexie is only
+    // a read-through/offline cache and must not suppress a fresh API read.
+    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
 
     set({ loading: true, error: null });
     try {

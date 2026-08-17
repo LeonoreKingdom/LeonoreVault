@@ -18,6 +18,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth';
 import { apiGet } from '@/lib/api';
+import { flattenInventoryTree, labelFor, type InventoryTreeNode } from '@/lib/inventory-data';
 
 type ApiItem = {
   id: string;
@@ -45,27 +46,6 @@ type InventoryItem = {
 
 type Filter = 'All items' | 'In storage' | 'Checked out' | 'Returned recently';
 
-const categoryLabels: Record<string, string> = {
-  tools: 'Tools',
-  health: 'Health',
-  outdoor: 'Outdoor',
-  documents: 'Documents',
-};
-
-const locationLabels: Record<string, string> = {
-  'garage-shelf-a': 'Garage shelf A',
-  'hallway-cabinet': 'Hallway cabinet',
-  'storage-room': 'Storage room',
-  'office-drawer': 'Office drawer',
-};
-
-const storageSpotDefinitions = [
-  { name: 'Garage shelf A', type: 'Shelf', color: 'bg-primary' },
-  { name: 'Hallway cabinet', type: 'Cabinet', color: 'bg-accent' },
-  { name: 'Storage room', type: 'Room', color: 'bg-success' },
-  { name: 'Office drawer', type: 'Drawer', color: 'bg-warning' },
-];
-
 const filters: Filter[] = ['All items', 'In storage', 'Checked out', 'Returned recently'];
 
 function dueLabel(isoDate: string | null): string | undefined {
@@ -76,22 +56,23 @@ function dueLabel(isoDate: string | null): string | undefined {
   return days === 1 ? 'Due tomorrow' : `Due in ${days} days`;
 }
 
-function toInventoryItem(item: ApiItem): InventoryItem {
+function toInventoryItem(item: ApiItem, categoryMap: Map<string, InventoryTreeNode>, locationMap: Map<string, InventoryTreeNode>): InventoryItem {
   return {
     id: item.id,
     name: item.name,
-    category: categoryLabels[item.categoryId ?? ''] ?? 'Uncategorized',
-    location: locationLabels[item.locationId ?? ''] ?? 'Unassigned',
+    category: labelFor(categoryMap, item.categoryId, 'Uncategorized'),
+    location: labelFor(locationMap, item.locationId),
     status: item.status === 'borrowed' ? 'checked-out' : 'in-storage',
     recentlyReturned: item.recentlyReturned,
-    borrowedBy: item.borrowedBy === 'mock-member-maya' ? 'Maya' : item.borrowedBy ?? undefined,
+    borrowedBy: item.borrowedBy ?? undefined,
     dueLabel: dueLabel(item.borrowDueDate),
   };
 }
 
 export default function DashboardPage() {
   const { user, membership } = useAuthStore();
-  const [mockItems, setMockItems] = useState<InventoryItem[]>([]);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [locations, setLocations] = useState<InventoryTreeNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -103,21 +84,20 @@ export default function DashboardPage() {
     const householdId = membership?.householdId;
 
     if (!householdId) {
-      setMockItems([]);
-      setLoading(false);
-      setError(null);
       return;
     }
 
-    apiGet<{ items: ApiItem[] }>(`/api/households/${householdId}/items`, {
-      page: '1',
-      limit: '20',
-      sort: 'updated_at',
-      order: 'desc',
-    })
-      .then((data) => {
+    Promise.all([
+      apiGet<{ items: ApiItem[] }>(`/api/households/${householdId}/items`, { page: '1', limit: '20', sort: 'updated_at', order: 'desc' }),
+      apiGet<{ tree: InventoryTreeNode[] }>(`/api/households/${householdId}/categories`),
+      apiGet<{ tree: InventoryTreeNode[] }>(`/api/households/${householdId}/locations`),
+    ])
+      .then(([data, categoryResponse, locationResponse]) => {
         if (cancelled) return;
-        setMockItems(data.items.map(toInventoryItem));
+        const categoryMap = new Map(flattenInventoryTree(categoryResponse.tree).map((node) => [node.id, node]));
+        const locationMap = new Map(flattenInventoryTree(locationResponse.tree).map((node) => [node.id, node]));
+        setLocations(locationResponse.tree);
+        setInventoryItems(data.items.map((item) => toInventoryItem(item, categoryMap, locationMap)));
         setError(null);
       })
       .catch((requestError: unknown) => {
@@ -134,26 +114,28 @@ export default function DashboardPage() {
   }, [membership?.householdId]);
 
   const firstName = user?.displayName?.split(' ')[0] || 'there';
-  const storedCount = mockItems.filter((item) => item.status === 'in-storage').length;
-  const checkedOutCount = mockItems.filter((item) => item.status === 'checked-out').length;
-  const returnedCount = mockItems.filter((item) => item.recentlyReturned).length;
+  const storedCount = inventoryItems.filter((item) => item.status === 'in-storage').length;
+  const checkedOutCount = inventoryItems.filter((item) => item.status === 'checked-out').length;
+  const returnedCount = inventoryItems.filter((item) => item.recentlyReturned).length;
   const locationOptions = useMemo(
-    () => ['All locations', ...Array.from(new Set(mockItems.map((item) => item.location)))],
-    [mockItems],
+    () => ['All locations', ...Array.from(new Set(inventoryItems.map((item) => item.location)))],
+    [inventoryItems],
   );
   const storageSpots = useMemo(
     () =>
-      storageSpotDefinitions.map((spot) => ({
-        ...spot,
-        itemCount: mockItems.filter((item) => item.location === spot.name).length,
+      flattenInventoryTree(locations).map((spot, index) => ({
+        name: spot.name,
+        type: spot.children?.length ? 'Area' : 'Spot',
+        color: ['bg-primary', 'bg-accent', 'bg-success', 'bg-warning'][index % 4],
+        itemCount: inventoryItems.filter((item) => item.location === spot.name).length,
       })),
-    [mockItems],
+    [inventoryItems, locations],
   );
 
   const visibleItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
-    return mockItems.filter((item) => {
+    return inventoryItems.filter((item) => {
       const matchesQuery =
         !normalizedQuery ||
         [item.name, item.category, item.location].some((value) =>
@@ -170,7 +152,7 @@ export default function DashboardPage() {
 
       return matchesQuery && matchesFilter && matchesLocation;
     });
-  }, [activeFilter, locationFilter, mockItems, query]);
+  }, [activeFilter, locationFilter, inventoryItems, query]);
 
   return (
     <div className="space-y-8">
@@ -200,7 +182,7 @@ export default function DashboardPage() {
         <SummaryCard
           icon={Package}
           label="Total items"
-          value={mockItems.length}
+          value={inventoryItems.length}
           detail="in your home"
           tone="primary"
         />

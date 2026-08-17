@@ -2,644 +2,121 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { type FormEvent, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
-  ArrowUpRight,
   CalendarDays,
   CheckCircle2,
-  Clock3,
   Edit3,
+  FileText,
+  Loader2,
   MapPin,
-  Package,
   QrCode,
   RotateCcw,
   Tag,
   UserRound,
 } from 'lucide-react';
+import { apiGet, apiPost } from '@/lib/api';
+import { flattenInventoryTree, formatStatus, labelFor, statusClass, type InventoryTreeNode } from '@/lib/inventory-data';
+import { useItemsStore } from '@/stores/items';
+import { useAuthStore } from '@/stores/auth';
 
-type MockItemDetail = {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  location: string;
-  quantity: number;
-  status: 'Stored' | 'Checked out' | 'Needs a home';
-  updated: string;
-  created: string;
-  createdBy: string;
-  tags: string[];
-  note: string;
-  borrower?: string;
-  dueDate?: string;
-};
-
-type MockActivity = {
-  id: string;
-  kind: 'created' | 'updated' | 'checkout' | 'return';
-  title: string;
-  detail: string;
-  date: string;
-};
-
-const mockItemDetails: MockItemDetail[] = [
-  {
-    id: 'item-camera',
-    name: 'Mirrorless camera',
-    description: 'Compact camera kit for family trips, day walks, and weekend projects.',
-    category: 'Electronics',
-    location: 'Media cabinet',
-    quantity: 1,
-    status: 'Stored',
-    updated: 'Today at 09:42',
-    created: 'August 2, 2026',
-    createdBy: 'You',
-    tags: ['travel', 'fragile'],
-    note: 'Keep the spare battery and charger in the same pouch.',
-  },
-  {
-    id: 'item-drill',
-    name: 'Cordless drill',
-    description: '18V drill for small household repairs and weekend maintenance.',
-    category: 'Tools',
-    location: 'Tool cabinet',
-    quantity: 1,
-    status: 'Checked out',
-    updated: 'Yesterday at 16:20',
-    created: 'July 14, 2026',
-    createdBy: 'You',
-    tags: ['maintenance'],
-    note: 'Return with the charger and the small bit case.',
-    borrower: 'Raka',
-    dueDate: 'August 18, 2026',
-  },
-  {
-    id: 'item-linens',
-    name: 'Guest bed linens',
-    description: 'Clean spare sheets and pillowcases for the guest room.',
-    category: 'Bedroom',
-    location: 'Wardrobe',
-    quantity: 2,
-    status: 'Stored',
-    updated: 'Yesterday at 11:05',
-    created: 'July 28, 2026',
-    createdBy: 'You',
-    tags: ['seasonal'],
-    note: 'Folded together in the blue fabric bag.',
-  },
-  {
-    id: 'item-board-games',
-    name: 'Board game collection',
-    description: 'A small collection for family evenings and visiting friends.',
-    category: 'Entertainment',
-    location: 'Bookcase',
-    quantity: 6,
-    status: 'Stored',
-    updated: 'August 12, 2026',
-    created: 'June 30, 2026',
-    createdBy: 'You',
-    tags: ['family', 'weekend'],
-    note: 'Check that all pieces are back in their original boxes after use.',
-  },
-  {
-    id: 'item-spices',
-    name: 'Everyday spice set',
-    description: 'Frequently used spices kept together for quick cooking.',
-    category: 'Kitchen',
-    location: 'Pantry shelves',
-    quantity: 12,
-    status: 'Stored',
-    updated: 'August 11, 2026',
-    created: 'July 5, 2026',
-    createdBy: 'You',
-    tags: ['daily use'],
-    note: 'Review the best-before dates during the next pantry reset.',
-  },
-  {
-    id: 'item-projector',
-    name: 'Portable projector',
-    description: 'Portable projector for movie nights and presentations.',
-    category: 'Electronics',
-    location: 'Media cabinet',
-    quantity: 1,
-    status: 'Checked out',
-    updated: 'August 14, 2026',
-    created: 'July 20, 2026',
-    createdBy: 'You',
-    tags: ['loaned'],
-    note: 'Pack the HDMI adapter with the projector case.',
-    borrower: 'Dimas',
-    dueDate: 'August 16, 2026',
-  },
-  {
-    id: 'item-birthday',
-    name: 'Birthday decorations',
-    description: 'Reusable banners, candles, and table decorations for celebrations.',
-    category: 'Events',
-    location: 'Unassigned',
-    quantity: 1,
-    status: 'Needs a home',
-    updated: 'August 13, 2026',
-    created: 'August 13, 2026',
-    createdBy: 'You',
-    tags: ['party'],
-    note: 'Choose a dry, easy-to-reach spot before the next celebration.',
-  },
-  {
-    id: 'item-screw-set',
-    name: 'Wood screw set',
-    description: 'Assorted screws for small furniture fixes and home projects.',
-    category: 'Tools',
-    location: 'Workshop shelf',
-    quantity: 4,
-    status: 'Stored',
-    updated: 'August 8, 2026',
-    created: 'July 8, 2026',
-    createdBy: 'You',
-    tags: ['maintenance', 'spares'],
-    note: 'Keep sorted by size in the labelled organiser.',
-  },
-];
-
-const mockBorrowers = ['Raka', 'Dimas', 'Maya'];
-
-function buildMockActivity(item: MockItemDetail): MockActivity[] {
-  const events: MockActivity[] = [
-    {
-      id: `${item.id}-updated`,
-      kind: 'updated',
-      title: 'Details updated',
-      detail: 'Item information was refreshed.',
-      date: item.updated,
-    },
-    {
-      id: `${item.id}-created`,
-      kind: 'created',
-      title: 'Added to inventory',
-      detail: `Added by ${item.createdBy}.`,
-      date: item.created,
-    },
-  ];
-
-  if (item.status === 'Checked out' && item.borrower && item.dueDate) {
-    events.splice(1, 0, {
-      id: `${item.id}-checkout`,
-      kind: 'checkout',
-      title: 'Checked out',
-      detail: `Borrowed by ${item.borrower} · due ${item.dueDate}.`,
-      date: item.updated,
-    });
-  }
-
-  return events;
-}
-
-function formatDueDate(value: string) {
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-  }).format(new Date(`${value}T00:00:00`));
-}
+type TreeResponse = { tree: InventoryTreeNode[] };
+type HouseholdResponse = { members: Array<{ userId: string; user: { displayName: string | null; email: string } }> };
+type Attachment = { id: string; fileName: string; mimeType: string; webViewLink: string | null; createdAt: string };
+type Activity = { id: string; action: string; details: Record<string, unknown> | null; createdAt: string; user?: { displayName: string | null } };
 
 export default function ItemDetailPage() {
   const params = useParams();
   const itemId = String(params.id);
-  const initialItem = mockItemDetails.find((entry) => entry.id === itemId);
-  const [item, setItem] = useState(initialItem);
-  const [activity, setActivity] = useState<MockActivity[]>(() =>
-    initialItem ? buildMockActivity(initialItem) : [],
-  );
-  const [checkoutOpen, setCheckoutOpen] = useState(false);
-  const [checkoutSaved, setCheckoutSaved] = useState(false);
-  const [returnSaved, setReturnSaved] = useState(false);
-  const [borrower, setBorrower] = useState(mockBorrowers[0]);
-  const [dueDate, setDueDate] = useState('2026-08-23');
+  const { membership } = useAuthStore();
+  const { selectedItem: item, loading, error, fetchItem, updateStatus } = useItemsStore();
+  const [categories, setCategories] = useState<InventoryTreeNode[]>([]);
+  const [locations, setLocations] = useState<InventoryTreeNode[]>([]);
+  const [members, setMembers] = useState<HouseholdResponse['members']>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [borrowerId, setBorrowerId] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  if (!item) {
-    return (
-      <div className="border-border bg-surface flex flex-col items-center justify-center rounded-2xl border px-6 py-16 text-center">
-        <Package size={48} className="text-muted-light mb-4" />
-        <h1 className="mb-2 text-xl font-bold">Item not found</h1>
-        <p className="text-muted mb-6">This mock item is not part of the current inventory view.</p>
-        <Link
-          href="/items"
-          className="from-primary to-accent rounded-xl bg-gradient-to-r px-5 py-2.5 font-medium text-white transition-opacity hover:opacity-90"
-        >
-          Back to items
-        </Link>
-      </div>
-    );
+  const householdId = membership?.householdId;
+  useEffect(() => {
+    if (!householdId) return;
+    let cancelled = false;
+    void Promise.all([
+      fetchItem(householdId, itemId),
+      apiGet<TreeResponse>(`/api/households/${householdId}/categories`),
+      apiGet<TreeResponse>(`/api/households/${householdId}/locations`),
+      apiGet<HouseholdResponse>(`/api/households/${householdId}`),
+      apiGet<Attachment[]>(`/api/households/${householdId}/items/${itemId}/attachments`),
+      apiGet<{ activities: Activity[] }>(`/api/households/${householdId}/items/${itemId}/activities`),
+    ])
+      .then(([, categoryResponse, locationResponse, householdResponse, attachmentResponse, activityResponse]) => {
+        if (cancelled) return;
+        setCategories(categoryResponse.tree);
+        setLocations(locationResponse.tree);
+        setMembers(householdResponse.members);
+        setAttachments(attachmentResponse);
+        setActivities(activityResponse.activities);
+      })
+      .catch((requestError) => {
+        if (!cancelled) setActionError((requestError as Error).message);
+      });
+    return () => { cancelled = true; };
+  }, [fetchItem, householdId, itemId]);
+
+  const categoryMap = useMemo(() => new Map(flattenInventoryTree(categories).map((node) => [node.id, node])), [categories]);
+  const locationMap = useMemo(() => new Map(flattenInventoryTree(locations).map((node) => [node.id, node])), [locations]);
+
+  async function checkout() {
+    if (!householdId || !item || !borrowerId) return;
+    setBusy(true); setActionError(null);
+    try {
+      await updateStatus(householdId, item.id, { status: 'borrowed', borrowed_by: borrowerId, borrow_due_date: dueDate ? new Date(`${dueDate}T23:59:59`).toISOString() : null });
+      await fetchItem(householdId, item.id);
+    } catch (requestError) { setActionError((requestError as Error).message); } finally { setBusy(false); }
   }
 
-  const statusTone = {
-    Stored: 'bg-success/10 text-success',
-    'Checked out': 'bg-primary/10 text-primary',
-    'Needs a home': 'bg-warning/10 text-warning',
-  }[item.status];
-
-  function handleCheckout(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setItem((current) =>
-      current
-        ? {
-            ...current,
-            status: 'Checked out',
-            borrower,
-            dueDate: formatDueDate(dueDate),
-            updated: 'Just now',
-          }
-        : current,
-    );
-    setActivity((current) => [
-      {
-        id: `${itemId}-checkout-${Date.now()}`,
-        kind: 'checkout',
-        title: 'Checked out',
-        detail: `Borrowed by ${borrower} · due ${formatDueDate(dueDate)}.`,
-        date: 'Just now',
-      },
-      ...current,
-    ]);
-    setCheckoutOpen(false);
-    setCheckoutSaved(true);
-    setReturnSaved(false);
+  async function returnItem() {
+    if (!householdId || !item) return;
+    setBusy(true); setActionError(null);
+    try {
+      await apiPost(`/api/households/${householdId}/items/${item.id}/return`, { note: null });
+      await fetchItem(householdId, item.id);
+      const activityResponse = await apiGet<{ activities: Activity[] }>(`/api/households/${householdId}/items/${item.id}/activities`);
+      setActivities(activityResponse.activities);
+    } catch (requestError) { setActionError((requestError as Error).message); } finally { setBusy(false); }
   }
 
-  function handleReturn() {
-    setItem((current) =>
-      current
-        ? {
-            ...current,
-            status: 'Stored',
-            borrower: undefined,
-            dueDate: undefined,
-            updated: 'Just now',
-          }
-        : current,
-    );
-    setActivity((current) => [
-      {
-        id: `${itemId}-return-${Date.now()}`,
-        kind: 'return',
-        title: 'Returned to storage',
-        detail: `Marked returned by you and placed back in ${item?.location ?? 'storage'}.`,
-        date: 'Just now',
-      },
-      ...current,
-    ]);
-    setReturnSaved(true);
-    setCheckoutSaved(false);
-  }
+  if (!householdId) return <StateCard message="No household membership is available for this account." />;
+  if (loading && !item) return <LoadingState />;
+  if (error || actionError) return <StateCard message={error ?? actionError ?? 'Failed to load item.'} danger />;
+  if (!item) return <StateCard message="Item not found in the Turso inventory." />;
 
   return (
     <div className="space-y-8">
-      <nav className="text-muted flex items-center gap-2 text-sm" aria-label="Breadcrumb">
-        <Link href="/items" className="hover:text-foreground transition-colors">
-          Items
-        </Link>
-        <span>/</span>
-        <span className="text-foreground truncate font-medium">{item.name}</span>
-      </nav>
-
-      <header className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 items-start gap-3 sm:gap-4">
-          <Link
-            href="/items"
-            aria-label="Back to items"
-            className="text-muted hover:text-foreground hover:bg-hover mt-1 rounded-xl p-2 transition-all"
-          >
-            <ArrowLeft size={20} />
-          </Link>
-          <div className="min-w-0">
-            <div className="mb-2 flex flex-wrap items-center gap-3">
-              <h1 className="text-2xl font-bold tracking-tight md:text-3xl">{item.name}</h1>
-              <StatusPill status={item.status} />
-            </div>
-            <p className="text-muted max-w-2xl">{item.description}</p>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2 self-start sm:self-auto">
-          <Link
-            href="/items/labels"
-            className="border-border hover:bg-hover inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition-colors"
-          >
-            <QrCode size={16} />
-            Generate QR label
-          </Link>
-          <Link
-            href={`/items/${item.id}/edit`}
-            className="border-border hover:bg-hover inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition-colors"
-          >
-            <Edit3 size={16} />
-            Edit item
-          </Link>
-        </div>
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex items-start gap-3 sm:gap-4"><Link href="/items" aria-label="Back to items" className="text-muted hover:text-foreground hover:bg-hover mt-1 rounded-xl p-2"><ArrowLeft size={20} /></Link><div><div className="text-muted mb-2 flex items-center gap-2 text-sm"><Link href="/items" className="hover:text-foreground">Items</Link><span>/</span><span>{item.name}</span></div><h1 className="text-2xl font-bold tracking-tight md:text-3xl">{item.name}</h1><p className="text-muted mt-1">Live item metadata from Turso.</p></div></div>
+        <div className="flex gap-2"><Link href={`/items/${item.id}/edit`} className="border-border hover:bg-hover inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold"><Edit3 size={16} /> Edit</Link><Link href={`/items/labels?item=${item.id}`} className="from-primary to-accent inline-flex items-center gap-2 rounded-xl bg-gradient-to-r px-4 py-2.5 text-sm font-semibold text-white"><QrCode size={16} /> Label</Link></div>
       </header>
 
-      <section className="from-primary/10 via-surface to-accent/10 border-border overflow-hidden rounded-2xl border bg-gradient-to-br p-5 shadow-sm sm:p-6">
-        <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-4">
-            <div className="bg-primary shadow-primary/20 flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-white shadow-lg">
-              <Package size={27} />
-            </div>
-            <div>
-              <p className="text-muted text-xs font-semibold uppercase tracking-wide">
-                Current home
-              </p>
-              <div className="mt-1 flex items-center gap-2">
-                <MapPin size={17} className="text-accent" />
-                <p className="text-lg font-bold">{item.location}</p>
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-6 sm:text-right">
-            <div>
-              <p className="text-muted text-xs">Quantity</p>
-              <p className="mt-1 text-xl font-bold">{item.quantity}</p>
-            </div>
-            <div>
-              <p className="text-muted text-xs">Category</p>
-              <p className="mt-1 text-sm font-bold">{item.category}</p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <section className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-6">
-          <section
-            className="border-border bg-surface rounded-2xl border p-5 shadow-sm sm:p-6"
-            aria-labelledby="details-heading"
-          >
-            <h2 id="details-heading" className="mb-5 text-lg font-bold">
-              Item details
-            </h2>
-            <div className="grid gap-x-8 gap-y-5 sm:grid-cols-2">
-              <DetailRow
-                icon={<Package size={16} />}
-                label="Quantity"
-                value={`${item.quantity} units`}
-              />
-              <DetailRow icon={<Tag size={16} />} label="Category" value={item.category} />
-              <DetailRow icon={<MapPin size={16} />} label="Location" value={item.location} />
-              <DetailRow icon={<UserRound size={16} />} label="Created by" value={item.createdBy} />
-            </div>
-          </section>
+          <section className="border-border bg-surface rounded-2xl border p-5 shadow-sm sm:p-6"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-muted text-xs font-semibold uppercase tracking-wide">Current status</p><span className={`mt-2 inline-flex rounded-full px-3 py-1 text-sm font-semibold ${statusClass(item.status)}`}>{formatStatus(item.status)}</span></div><div className="text-muted text-right text-sm"><p>Quantity</p><p className="text-foreground mt-1 text-xl font-bold">{item.quantity}</p></div></div><p className="text-muted mt-5 leading-relaxed">{item.description || 'No description has been added for this item.'}</p><div className="border-border mt-5 grid gap-4 border-t pt-5 sm:grid-cols-2"><InfoRow icon={<Tag size={16} />} label="Category" value={labelFor(categoryMap, item.categoryId)} /><InfoRow icon={<MapPin size={16} />} label="Location" value={labelFor(locationMap, item.locationId)} /><InfoRow icon={<CalendarDays size={16} />} label="Updated" value={new Date(item.updatedAt).toLocaleString()} /><InfoRow icon={<UserRound size={16} />} label="Created by" value={item.createdBy} /></div>{item.tags.length > 0 && <div className="mt-5 flex flex-wrap gap-2">{item.tags.map((tag) => <span key={tag} className="bg-hover text-muted rounded-full px-2.5 py-1 text-xs">{tag}</span>)}</div>}</section>
 
-          <section
-            className="border-border bg-surface rounded-2xl border p-5 shadow-sm sm:p-6"
-            aria-labelledby="notes-heading"
-          >
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 id="notes-heading" className="text-lg font-bold">
-                Notes
-              </h2>
-              <span className="text-muted text-xs">Household memory</span>
-            </div>
-            <p className="text-muted bg-background rounded-xl p-4 text-sm leading-relaxed">
-              {item.note}
-            </p>
-          </section>
+          {item.status === 'borrowed' ? <section className="border-border bg-surface rounded-2xl border p-5 shadow-sm"><h2 className="font-bold">Active checkout</h2><p className="text-muted mt-1 text-sm">Borrower: {members.find((member) => member.userId === item.borrowedBy)?.user.displayName || item.borrowedBy || 'Unknown member'}</p><p className="text-muted mt-1 text-sm">Due: {item.borrowDueDate ? new Date(item.borrowDueDate).toLocaleDateString() : 'No due date'}</p><button type="button" onClick={returnItem} disabled={busy} className="from-primary to-accent mt-5 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">{busy ? <Loader2 size={16} className="animate-spin" /> : <RotateCcw size={16} />} Mark returned</button></section> : <section className="border-border bg-surface rounded-2xl border p-5 shadow-sm"><h2 className="font-bold">Check out this item</h2><div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="text-sm font-semibold">Borrower<select value={borrowerId} onChange={(event) => setBorrowerId(event.target.value)} className="border-border bg-background mt-1 w-full rounded-xl border px-3 py-2.5 text-sm font-normal"><option value="">Select a household member</option>{members.map((member) => <option key={member.userId} value={member.userId}>{member.user.displayName || member.user.email}</option>)}</select></label><label className="text-sm font-semibold">Due date<input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} className="border-border bg-background mt-1 w-full rounded-xl border px-3 py-2.5 text-sm font-normal" /></label></div><button type="button" onClick={checkout} disabled={busy || !borrowerId} className="from-primary to-accent mt-5 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">{busy ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />} Check out item</button></section>}
 
-          <section
-            className="border-border bg-surface rounded-2xl border p-5 shadow-sm sm:p-6"
-            aria-labelledby="tags-heading"
-          >
-            <h2 id="tags-heading" className="mb-4 text-lg font-bold">
-              Tags
-            </h2>
-            <div className="flex flex-wrap gap-2">
-              {item.tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="bg-primary/10 text-primary rounded-full px-3 py-1 text-sm font-semibold"
-                >
-                  {tag}
-                </span>
-              ))}
-            </div>
-          </section>
+          <section className="border-border bg-surface rounded-2xl border p-5 shadow-sm"><div className="flex items-center justify-between"><div><h2 className="font-bold">Activity</h2><p className="text-muted mt-1 text-sm">Recorded in Turso.</p></div><FileText size={18} className="text-muted-light" /></div>{activities.length === 0 ? <p className="text-muted mt-5 text-sm">No activity recorded yet.</p> : <div className="mt-5 space-y-4">{activities.map((activity) => <div key={activity.id} className="border-border flex gap-3 border-l-2 pl-4"><div><p className="text-sm font-semibold">{activity.action.replaceAll('_', ' ')}</p><p className="text-muted mt-1 text-xs">{activity.user?.displayName || activity.user?.displayName === '' ? activity.user.displayName : 'Household member'} · {new Date(activity.createdAt).toLocaleString()}</p></div></div>)}</div>}</section>
         </div>
 
-        <aside className="space-y-6" aria-label="Item activity">
-          <section
-            className="border-border bg-surface rounded-2xl border p-5 shadow-sm"
-            aria-labelledby="activity-heading"
-          >
-            <div className="mb-5 flex items-start justify-between gap-3">
-              <div>
-                <div className="bg-accent/10 text-accent mb-3 flex h-9 w-9 items-center justify-center rounded-xl">
-                  <Clock3 size={18} />
-                </div>
-                <h2 id="activity-heading" className="font-bold">
-                  Activity
-                </h2>
-                <p className="text-muted mt-0.5 text-sm">A timeline of this item’s story.</p>
-              </div>
-              <ArrowUpRight size={17} className="text-muted-light" />
-            </div>
-            <ActivityTimeline events={activity} />
-          </section>
-
-          <section
-            className="border-border bg-surface rounded-2xl border p-5 shadow-sm"
-            aria-labelledby="status-heading"
-          >
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <h2 id="status-heading" className="font-bold">
-                Status
-              </h2>
-              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${statusTone}`}>
-                {item.status}
-              </span>
-            </div>
-            {checkoutSaved && (
-              <div className="bg-success/10 text-success mb-4 rounded-xl px-3 py-2.5 text-sm">
-                Checkout saved in this preview. The item is now marked as checked out.
-              </div>
-            )}
-            {returnSaved && (
-              <div className="bg-success/10 text-success mb-4 rounded-xl px-3 py-2.5 text-sm">
-                Return saved in this preview. The item is back in storage.
-              </div>
-            )}
-            {item.status === 'Checked out' && item.borrower && item.dueDate ? (
-              <div className="bg-primary/5 space-y-3 rounded-xl p-3">
-                <DetailRow icon={<UserRound size={15} />} label="With" value={item.borrower} />
-                <DetailRow icon={<CalendarDays size={15} />} label="Due" value={item.dueDate} />
-                <button
-                  type="button"
-                  onClick={handleReturn}
-                  className="border-primary/30 text-primary hover:bg-primary/10 inline-flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors"
-                >
-                  <RotateCcw size={15} />
-                  Mark as returned
-                </button>
-              </div>
-            ) : item.status === 'Stored' ? (
-              checkoutOpen ? (
-                <form onSubmit={handleCheckout} className="bg-primary/5 space-y-4 rounded-xl p-3">
-                  <div>
-                    <h3 className="text-sm font-bold">Check out this item</h3>
-                    <p className="text-muted mt-0.5 text-xs">
-                      Record who has it and when it should come home.
-                    </p>
-                  </div>
-                  <div>
-                    <label htmlFor="borrower" className="mb-1.5 block text-xs font-semibold">
-                      Borrowed by
-                    </label>
-                    <select
-                      id="borrower"
-                      value={borrower}
-                      onChange={(event) => setBorrower(event.target.value)}
-                      className="border-border bg-surface focus:border-primary focus:ring-primary/20 w-full rounded-xl border px-3 py-2.5 text-sm outline-none focus:ring-2"
-                    >
-                      {mockBorrowers.map((name) => (
-                        <option key={name}>{name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="due-date" className="mb-1.5 block text-xs font-semibold">
-                      Due date
-                    </label>
-                    <input
-                      id="due-date"
-                      type="date"
-                      required
-                      value={dueDate}
-                      onChange={(event) => setDueDate(event.target.value)}
-                      className="border-border bg-surface focus:border-primary focus:ring-primary/20 w-full rounded-xl border px-3 py-2.5 text-sm outline-none focus:ring-2"
-                    />
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setCheckoutOpen(false)}
-                      className="border-border hover:bg-hover flex-1 rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="from-primary to-accent flex-1 rounded-xl bg-gradient-to-r px-3 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
-                    >
-                      Confirm checkout
-                    </button>
-                  </div>
-                </form>
-              ) : (
-                <div className="bg-success/5 rounded-xl p-3">
-                  <div className="text-muted flex items-start gap-2 text-sm leading-relaxed">
-                    <CheckCircle2 size={16} className="text-success mt-0.5 shrink-0" />
-                    <span>This item is stored and ready to find.</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCheckoutOpen(true);
-                      setCheckoutSaved(false);
-                      setReturnSaved(false);
-                    }}
-                    className="from-primary to-accent mt-4 w-full rounded-xl bg-gradient-to-r px-3 py-2.5 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
-                  >
-                    Check out item
-                  </button>
-                </div>
-              )
-            ) : item.status === 'Needs a home' ? (
-              <div className="bg-warning/5 text-muted rounded-xl p-3 text-sm leading-relaxed">
-                Assign a storage spot so everyone can find this item next time.
-              </div>
-            ) : (
-              <div className="bg-success/5 text-muted flex items-start gap-2 rounded-xl p-3 text-sm leading-relaxed">
-                <CheckCircle2 size={16} className="text-success mt-0.5 shrink-0" />
-                This item is stored and ready to find.
-              </div>
-            )}
-          </section>
-        </aside>
-      </div>
+        <aside className="space-y-6"><section className="border-border bg-surface rounded-2xl border p-5 shadow-sm"><div className="flex items-center gap-3"><div className="bg-primary/10 text-primary flex h-10 w-10 items-center justify-center rounded-xl"><FileText size={18} /></div><div><h2 className="font-bold">Attachments</h2><p className="text-muted text-xs">Stored and served through Cloudflare R2.</p></div></div>{attachments.length === 0 ? <p className="text-muted mt-5 text-sm">No attachments linked to this item.</p> : <div className="mt-5 space-y-2">{attachments.map((attachment) => <a key={attachment.id} href={attachment.webViewLink || undefined} target="_blank" rel="noreferrer" className="border-border hover:bg-hover flex items-center gap-3 rounded-xl border p-3 text-sm"><FileText size={16} className="text-primary" /><span className="min-w-0 flex-1 truncate">{attachment.fileName}</span><span className="text-muted-light text-xs">Open</span></a>)}</div>}</section><section className="border-border bg-surface rounded-2xl border p-5 shadow-sm"><h2 className="font-bold">Record identity</h2><p className="text-muted mt-3 break-all text-xs">{item.id}</p><p className="text-muted mt-2 text-xs">QR token: {item.qrToken ? 'available' : 'not assigned'}</p></section></aside>
+      </section>
     </div>
   );
 }
 
-function StatusPill({ status }: { status: MockItemDetail['status'] }) {
-  const styles = {
-    Stored: 'bg-success/10 text-success',
-    'Checked out': 'bg-primary/10 text-primary',
-    'Needs a home': 'bg-warning/10 text-warning',
-  };
-
-  return (
-    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${styles[status]}`}>
-      {status}
-    </span>
-  );
-}
-
-function DetailRow({
-  icon,
-  label,
-  value,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3">
-      <span className="text-muted flex items-center gap-2 text-sm">
-        {icon}
-        {label}
-      </span>
-      <span className="truncate text-right text-sm font-semibold">{value}</span>
-    </div>
-  );
-}
-
-function ActivityTimeline({ events }: { events: MockActivity[] }) {
-  return (
-    <div className="space-y-0">
-      {events.map((event, index) => (
-        <ActivityEvent key={event.id} event={event} isLast={index === events.length - 1} />
-      ))}
-    </div>
-  );
-}
-
-function ActivityEvent({ event, isLast }: { event: MockActivity; isLast: boolean }) {
-  const tone = {
-    created: 'bg-primary/10 text-primary',
-    updated: 'bg-hover text-muted',
-    checkout: 'bg-warning/10 text-warning',
-    return: 'bg-success/10 text-success',
-  }[event.kind];
-  const Icon = {
-    created: Package,
-    updated: Edit3,
-    checkout: UserRound,
-    return: RotateCcw,
-  }[event.kind];
-
-  return (
-    <div className="flex gap-3">
-      <div className="flex w-8 shrink-0 flex-col items-center">
-        <div className={`flex h-8 w-8 items-center justify-center rounded-xl ${tone}`}>
-          <Icon size={15} />
-        </div>
-        {!isLast && <div className="bg-border my-1 h-full w-px" />}
-      </div>
-      <div className={`min-w-0 flex-1 ${isLast ? 'pb-0' : 'pb-5'}`}>
-        <div className="flex items-start justify-between gap-3">
-          <p className="text-sm font-semibold">{event.title}</p>
-          <span className="text-muted shrink-0 text-xs">{event.date}</span>
-        </div>
-        <p className="text-muted mt-1 text-xs leading-relaxed">{event.detail}</p>
-      </div>
-    </div>
-  );
-}
+function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) { return <div className="flex items-start gap-2 text-sm"><span className="text-muted mt-0.5">{icon}</span><div><p className="text-muted text-xs">{label}</p><p className="mt-0.5 truncate font-semibold">{value}</p></div></div>; }
+function LoadingState() { return <div className="flex justify-center py-20"><Loader2 size={30} className="text-primary animate-spin" /></div>; }
+function StateCard({ message, danger = false }: { message: string; danger?: boolean }) { return <div className={`${danger ? 'bg-danger/10 text-danger' : 'border-border bg-surface text-muted'} rounded-2xl border px-5 py-6 text-sm`}>{message}</div>; }

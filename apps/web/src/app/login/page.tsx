@@ -200,7 +200,7 @@ export default function LoginPage() {
                 <div className="bg-success/10 text-success flex items-start gap-3 rounded-2xl px-4 py-3.5 text-sm">
                   <CheckCircle2 size={19} className="mt-0.5 shrink-0" />
                   <div>
-                    <p className="font-semibold">Sign-in preview ready.</p>
+                    <p className="font-semibold">Sign-in successful.</p>
                     <p className="mt-0.5 opacity-80">
                       Your local session is ready. Redirecting to your inventory…
                     </p>
@@ -308,7 +308,7 @@ export default function LoginPage() {
                 <div className="bg-success/10 text-success flex items-start gap-3 rounded-2xl px-4 py-3.5 text-sm">
                   <CheckCircle2 size={19} className="mt-0.5 shrink-0" />
                   <div>
-                    <p className="font-semibold">Your account preview is ready.</p>
+                    <p className="font-semibold">Your account is ready.</p>
                     <p className="mt-0.5 opacity-80">
                       Your local account is ready. Redirecting to your inventory…
                     </p>

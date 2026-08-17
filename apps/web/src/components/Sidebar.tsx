@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useAuthStore } from '@/stores/auth';
 import ThemeToggle from './ThemeToggle';
+import { apiGet } from '@/lib/api';
 import {
   Package,
   MapPin,
@@ -15,7 +16,7 @@ import {
   ChevronRight,
   ChevronDown,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: Home },
@@ -25,18 +26,31 @@ const navItems = [
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 
-const mockHouseholds = [
-  { id: 'casa-leonore', name: 'Casa Leonore', detail: 'Personal home' },
-  { id: 'studio-ops', name: 'Studio Ops', detail: 'Shared workspace' },
-  { id: 'weekend-cabin', name: 'Weekend cabin', detail: 'Seasonal home' },
-];
+type HouseholdOption = { id: string; name: string; detail: string };
+type HouseholdListResponse = { households: Array<{ household: { id: string; name: string; description?: string | null } }> };
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { user, signOut } = useAuthStore();
+  const { user, membership, signOut } = useAuthStore();
   const [collapsed, setCollapsed] = useState(false);
   const [householdOpen, setHouseholdOpen] = useState(false);
-  const [activeHousehold, setActiveHousehold] = useState(mockHouseholds[0]);
+  const [households, setHouseholds] = useState<HouseholdOption[]>([]);
+
+  useEffect(() => {
+    void apiGet<HouseholdListResponse>('/api/households')
+      .then((response) => setHouseholds(response.households.map(({ household }) => ({
+        id: household.id,
+        name: household.name,
+        detail: household.description || 'Household',
+      }))))
+      .catch(() => setHouseholds([]));
+  }, []);
+
+  const activeHousehold = households.find((household) => household.id === membership?.householdId) ?? households[0] ?? {
+    id: membership?.householdId ?? '',
+    name: 'Household',
+    detail: 'Live household',
+  };
 
   return (
     <aside
@@ -77,7 +91,7 @@ export default function Sidebar() {
           role="listbox"
           aria-label="Households"
         >
-          {mockHouseholds.map((household) => {
+          {households.map((household) => {
             const isActive = household.id === activeHousehold.id;
             return (
               <button
@@ -86,7 +100,6 @@ export default function Sidebar() {
                 role="option"
                 aria-selected={isActive}
                 onClick={() => {
-                  setActiveHousehold(household);
                   setHouseholdOpen(false);
                 }}
                 className={`hover:bg-hover flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left transition-colors ${
