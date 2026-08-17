@@ -1,67 +1,128 @@
 'use client';
 
-import {
-  mockDownload,
-  mockRequest,
-  mockUploadAttachments,
-} from '@/lib/mock-service';
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL ?? '').replace(/\/$/, '');
 
-/**
- * Local service boundary used by the frontend-first mock slice.
- * The method signatures mirror the future API contract so the UI does not
- * need to know whether data comes from a mock, Next route handler, or Turso.
- */
-async function request<T>(
-  method: string,
-  path: string,
-  options?: { body?: unknown; params?: Record<string, string> },
-): Promise<T> {
-  return mockRequest<T>(method, path, options);
+type RequestOptions = {
+  body?: unknown;
+  params?: Record<string, string | number | boolean | undefined>;
+};
+
+type ApiFetchOptions = Omit<RequestInit, 'body'> & {
+  body?: unknown;
+  params?: RequestOptions['params'];
+};
+
+function buildUrl(path: string, params?: RequestOptions['params']): string {
+  const baseUrl =
+    API_BASE_URL || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000');
+  const url = new URL(path, `${baseUrl}/`);
+  for (const [key, value] of Object.entries(params ?? {})) {
+    if (value !== undefined) url.searchParams.set(key, String(value));
+  }
+  return url.toString();
 }
 
-/** GET request */
-export function apiGet<T>(path: string, params?: Record<string, string>) {
+async function readJson(response: Response): Promise<unknown> {
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) return null;
+  return response.json();
+}
+
+function errorMessage(payload: unknown, fallback: string): string {
+  if (!payload || typeof payload !== 'object') return fallback;
+  const value = payload as {
+    error?: { message?: string } | string;
+    message?: string;
+  };
+  if (typeof value.error === 'string') return value.error;
+  if (value.error?.message) return value.error.message;
+  if (value.message) return value.message;
+  return fallback;
+}
+
+/** Make an authenticated request and return the raw JSON response. */
+export async function apiFetch<T>(
+  path: string,
+  options: ApiFetchOptions = {},
+): Promise<T> {
+  const { params, ...requestInit } = options;
+  const body = requestInit.body;
+  const headers = new Headers(requestInit.headers);
+  if (body !== undefined && !(body instanceof FormData) && !headers.has('content-type')) {
+    headers.set('content-type', 'application/json');
+  }
+
+  const response = await fetch(buildUrl(path, params), {
+    ...requestInit,
+    headers,
+    credentials: 'include',
+    body:
+      body !== undefined && !(body instanceof FormData) && typeof body !== 'string'
+        ? JSON.stringify(body)
+        : body,
+  });
+  const payload = await readJson(response);
+  if (!response.ok) {
+    throw new Error(errorMessage(payload, `Request failed with status ${response.status}`));
+  }
+  return payload as T;
+}
+
+/** Make an API request and unwrap LeonoreVault's `{ success, data }` envelope. */
+async function request<T>(method: string, path: string, options?: RequestOptions): Promise<T> {
+  const payload = await apiFetch<{ success: boolean; data: T }>(path, {
+    method,
+    params: options?.params,
+    body: options?.body,
+  });
+  return payload.data;
+}
+
+export function apiGet<T>(path: string, params?: RequestOptions['params']) {
   return request<T>('GET', path, { params });
 }
 
-/** POST request */
 export function apiPost<T>(path: string, body?: unknown) {
   return request<T>('POST', path, { body });
 }
 
-/** PATCH request */
 export function apiPatch<T>(path: string, body?: unknown) {
   return request<T>('PATCH', path, { body });
 }
 
-/** DELETE request */
 export function apiDelete<T>(path: string) {
   return request<T>('DELETE', path);
 }
 
-/** Download a mock binary while preserving the future download contract. */
-export function apiDownload(
+/** Download a binary API response such as a QR image or label PDF. */
+export async function apiDownload(
   path: string,
-  options?: { method?: 'GET' | 'POST'; body?: unknown },
+  options: { method?: 'GET' | 'POST'; body?: unknown } = {},
 ): Promise<Blob> {
-  void options;
-  return mockDownload(path);
+  const response = await fetch(buildUrl(path), {
+    method: options.method ?? 'GET',
+    credentials: 'include',
+    headers: options.body === undefined ? undefined : { 'content-type': 'application/json' },
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
+  });
+  if (!response.ok) {
+    const payload = await readJson(response);
+    throw new Error(errorMessage(payload, `Download failed with status ${response.status}`));
+  }
+  return response.blob();
 }
 
-/**
- * Upload files to the local mock service with simulated progress.
- * The callback remains compatible with the future presigned R2 upload flow.
- */
+/** Upload files to the API; the API stores bytes in Cloudflare R2. */
 export async function apiUpload<T>(
   path: string,
   formData: FormData,
   onProgress?: (percent: number) => void,
 ): Promise<T> {
-  onProgress?.(20);
-  const itemMatch = path.match(/\/items\/([^/]+)\/attachments/);
-  if (!itemMatch) throw new Error('Invalid attachment upload path');
-
-  const result = await mockUploadAttachments(itemMatch[1]!, formData);
+  onProgress?.(10);
+  const payload = await apiFetch<{ success: boolean; data: T }>(path, {
+    method: 'POST',
+    body: formData,
+  });
   onProgress?.(100);
-  return result as T;
+  return payload.data;
 }

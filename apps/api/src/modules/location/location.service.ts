@@ -1,137 +1,93 @@
 import type { CreateLocationSchema, UpdateLocationSchema } from '@leonorevault/shared';
-import { supabaseAdmin } from '../../config/supabase.js';
+import { getInventoryRepositories } from '../../db/repositories/runtime.js';
 import { AppError } from '../../middleware/errorHandler.js';
 import { logger } from '../../middleware/logger.js';
 
-// ─── Helpers ────────────────────────────────────────────────
-
 interface LocationRow {
-  id: string;
-  household_id: string;
-  name: string;
-  parent_id: string | null;
-  description: string | null;
-  sort_order: number;
-}
-
-interface TreeNode {
   id: string;
   householdId: string;
   name: string;
   parentId: string | null;
   description: string | null;
   sortOrder: number;
+}
+
+interface TreeNode extends LocationRow {
   children: TreeNode[];
 }
 
-function mapLocation(row: LocationRow): Omit<TreeNode, 'children'> {
+function mapLocation(row: LocationRow): LocationRow {
   return {
     id: row.id,
-    householdId: row.household_id,
+    householdId: row.householdId,
     name: row.name,
-    parentId: row.parent_id,
+    parentId: row.parentId,
     description: row.description,
-    sortOrder: row.sort_order,
+    sortOrder: row.sortOrder,
   };
 }
 
 function buildTree(flat: LocationRow[]): TreeNode[] {
   const map = new Map<string, TreeNode>();
   const roots: TreeNode[] = [];
-
-  for (const row of flat) {
-    map.set(row.id, { ...mapLocation(row), children: [] });
-  }
-
+  for (const row of flat) map.set(row.id, { ...mapLocation(row), children: [] });
   for (const node of map.values()) {
-    if (node.parentId && map.has(node.parentId)) {
-      map.get(node.parentId)!.children.push(node);
-    } else {
-      roots.push(node);
-    }
+    if (node.parentId && map.has(node.parentId)) map.get(node.parentId)!.children.push(node);
+    else roots.push(node);
   }
-
   const sortChildren = (nodes: TreeNode[]) => {
     nodes.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
-    for (const n of nodes) sortChildren(n.children);
+    for (const node of nodes) sortChildren(node.children);
   };
   sortChildren(roots);
-
   return roots;
 }
 
 async function assertParentInHousehold(parentId: string, householdId: string) {
-  const { data, error } = await supabaseAdmin
-    .from('locations')
-    .select('id')
-    .eq('id', parentId)
-    .eq('household_id', householdId)
-    .maybeSingle();
-
-  if (error) {
-    logger.error({ error: error.message }, 'Failed to validate location parent');
-    throw new AppError(500, 'Failed to validate location parent', 'INTERNAL_ERROR');
-  }
-  if (!data) {
+  const repositories = await getInventoryRepositories();
+  if (!(await repositories.locations.findByIdInHousehold(parentId, householdId))) {
     throw new AppError(400, 'The selected parent location is invalid', 'INVALID_PARENT');
   }
 }
 
-// ─── Service Functions ──────────────────────────────────────
+function mapDatabaseError(err: unknown, action: string): never {
+  const message = err instanceof Error ? err.message : String(err);
+  if (message.includes('UNIQUE') || message.includes('unique')) {
+    throw new AppError(409, 'A location with this name already exists at this level', 'DUPLICATE');
+  }
+  if (message.includes('FOREIGN KEY') || message.includes('foreign key')) {
+    throw new AppError(400, 'The selected parent location is invalid', 'INVALID_PARENT');
+  }
+  logger.error({ err }, `Failed to ${action} location`);
+  throw new AppError(500, `Failed to ${action} location`, 'INTERNAL_ERROR');
+}
 
 export async function getLocationTree(householdId: string) {
-  const { data, error } = await supabaseAdmin
-    .from('locations')
-    .select('*')
-    .eq('household_id', householdId)
-    .order('sort_order', { ascending: true });
-
-  if (error) {
-    logger.error({ error: error.message }, 'Failed to fetch locations');
-    throw new AppError(500, 'Failed to fetch locations', 'INTERNAL_ERROR');
+  try {
+    const repositories = await getInventoryRepositories();
+    const rows = await repositories.locations.listByHousehold(householdId);
+    return { tree: buildTree(rows as unknown as LocationRow[]) };
+  } catch (err) {
+    mapDatabaseError(err, 'fetch');
   }
-
-  return { tree: buildTree(data as LocationRow[]) };
 }
 
 export async function createLocation(householdId: string, payload: CreateLocationSchema) {
   if (payload.parent_id) await assertParentInHousehold(payload.parent_id, householdId);
-
-  const { data, error } = await supabaseAdmin
-    .from('locations')
-    .insert({
-      household_id: householdId,
+  try {
+    const repositories = await getInventoryRepositories();
+    const row = await repositories.locations.create({
+      householdId,
       name: payload.name,
-      parent_id: payload.parent_id ?? null,
+      parentId: payload.parent_id ?? null,
       description: payload.description ?? null,
-      sort_order: payload.sort_order ?? 0,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    if (error.code === '23514' || error.message.includes('depth')) {
-      throw new AppError(400, 'Maximum location depth (3 levels) exceeded', 'DEPTH_EXCEEDED');
-    }
-    if (error.code === '23503' || error.message.includes('foreign key')) {
-      throw new AppError(400, 'The selected parent location is invalid', 'INVALID_PARENT');
-    }
-    if (
-      error.code === '23505' ||
-      error.message.includes('unique') ||
-      error.message.includes('duplicate')
-    ) {
-      throw new AppError(
-        409,
-        'A location with this name already exists at this level',
-        'DUPLICATE',
-      );
-    }
-    logger.error({ error: error.message }, 'Failed to create location');
-    throw new AppError(500, 'Failed to create location', 'INTERNAL_ERROR');
+      sortOrder: payload.sort_order ?? 0,
+    });
+    if (!row) throw new Error('Location insert returned no row');
+    return { location: mapLocation(row as unknown as LocationRow) };
+  } catch (err) {
+    mapDatabaseError(err, 'create');
   }
-
-  return { location: mapLocation(data as LocationRow) };
 }
 
 export async function updateLocation(
@@ -141,10 +97,9 @@ export async function updateLocation(
 ) {
   const updateData: Record<string, unknown> = {};
   if (payload.name !== undefined) updateData.name = payload.name;
-  if (payload.parent_id !== undefined) updateData.parent_id = payload.parent_id;
+  if (payload.parent_id !== undefined) updateData.parentId = payload.parent_id;
   if (payload.description !== undefined) updateData.description = payload.description;
-  if (payload.sort_order !== undefined) updateData.sort_order = payload.sort_order;
-
+  if (payload.sort_order !== undefined) updateData.sortOrder = payload.sort_order;
   if (Object.keys(updateData).length === 0) {
     throw new AppError(400, 'At least one location field is required', 'EMPTY_UPDATE');
   }
@@ -154,46 +109,25 @@ export async function updateLocation(
     }
     await assertParentInHousehold(payload.parent_id, householdId);
   }
-
-  const { data, error } = await supabaseAdmin
-    .from('locations')
-    .update(updateData)
-    .eq('id', locationId)
-    .eq('household_id', householdId)
-    .select()
-    .single();
-
-  if (error) {
-    if (error.code === '23514' || error.message.includes('depth')) {
-      throw new AppError(400, 'Maximum location depth (3 levels) exceeded', 'DEPTH_EXCEEDED');
-    }
-    if (error.code === '23503' || error.message.includes('foreign key')) {
-      throw new AppError(400, 'The selected parent location is invalid', 'INVALID_PARENT');
-    }
-    if (error.code === 'PGRST116') {
-      throw new AppError(404, 'Location not found', 'NOT_FOUND');
-    }
-    logger.error({ error: error.message }, 'Failed to update location');
-    throw new AppError(500, 'Failed to update location', 'INTERNAL_ERROR');
+  try {
+    const repositories = await getInventoryRepositories();
+    const row = await repositories.locations.update(locationId, householdId, updateData);
+    if (!row) throw new AppError(404, 'Location not found', 'NOT_FOUND');
+    return { location: mapLocation(row as unknown as LocationRow) };
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    mapDatabaseError(err, 'update');
   }
-
-  return { location: mapLocation(data as LocationRow) };
 }
 
 export async function deleteLocation(locationId: string, householdId: string) {
-  const { data, error } = await supabaseAdmin
-    .from('locations')
-    .delete()
-    .eq('id', locationId)
-    .eq('household_id', householdId)
-    .select('id')
-    .maybeSingle();
-
-  if (error) {
-    logger.error({ error: error.message }, 'Failed to delete location');
-    throw new AppError(500, 'Failed to delete location', 'INTERNAL_ERROR');
+  try {
+    const repositories = await getInventoryRepositories();
+    const deleted = await repositories.locations.remove(locationId, householdId);
+    if (!deleted) throw new AppError(404, 'Location not found', 'NOT_FOUND');
+    return { deleted: true, id: locationId };
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    mapDatabaseError(err, 'delete');
   }
-  if (!data) throw new AppError(404, 'Location not found', 'NOT_FOUND');
-
-  return { deleted: true, id: locationId };
 }

@@ -1,6 +1,6 @@
 /**
  * User entity type — maps to the `users` table.
- * The `id` matches the Supabase Auth `auth.users.id`.
+ * The `id` is the Better Auth user identifier stored in Turso.
  */
 export interface User {
   id: string;

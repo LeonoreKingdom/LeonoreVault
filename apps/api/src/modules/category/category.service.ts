@@ -1,21 +1,9 @@
 import type { CreateCategorySchema, UpdateCategorySchema } from '@leonorevault/shared';
-import { supabaseAdmin } from '../../config/supabase.js';
+import { getInventoryRepositories } from '../../db/repositories/runtime.js';
 import { AppError } from '../../middleware/errorHandler.js';
 import { logger } from '../../middleware/logger.js';
 
-// ─── Helpers ────────────────────────────────────────────────
-
 interface CategoryRow {
-  id: string;
-  household_id: string;
-  name: string;
-  parent_id: string | null;
-  icon: string | null;
-  color: string | null;
-  sort_order: number;
-}
-
-interface TreeNode {
   id: string;
   householdId: string;
   name: string;
@@ -23,131 +11,88 @@ interface TreeNode {
   icon: string | null;
   color: string | null;
   sortOrder: number;
+}
+
+interface TreeNode extends CategoryRow {
   children: TreeNode[];
 }
 
-function mapCategory(row: CategoryRow): Omit<TreeNode, 'children'> {
+function mapCategory(row: CategoryRow): CategoryRow {
   return {
     id: row.id,
-    householdId: row.household_id,
+    householdId: row.householdId,
     name: row.name,
-    parentId: row.parent_id,
+    parentId: row.parentId,
     icon: row.icon,
     color: row.color,
-    sortOrder: row.sort_order,
+    sortOrder: row.sortOrder,
   };
 }
 
 function buildTree(flat: CategoryRow[]): TreeNode[] {
   const map = new Map<string, TreeNode>();
   const roots: TreeNode[] = [];
-
-  for (const row of flat) {
-    map.set(row.id, { ...mapCategory(row), children: [] });
-  }
-
+  for (const row of flat) map.set(row.id, { ...mapCategory(row), children: [] });
   for (const node of map.values()) {
-    if (node.parentId && map.has(node.parentId)) {
-      map.get(node.parentId)!.children.push(node);
-    } else {
-      roots.push(node);
-    }
+    if (node.parentId && map.has(node.parentId)) map.get(node.parentId)!.children.push(node);
+    else roots.push(node);
   }
-
-  // Sort children by sort_order
   const sortChildren = (nodes: TreeNode[]) => {
     nodes.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
-    for (const n of nodes) sortChildren(n.children);
+    for (const node of nodes) sortChildren(node.children);
   };
   sortChildren(roots);
-
   return roots;
 }
 
 async function assertParentInHousehold(parentId: string, householdId: string) {
-  const { data, error } = await supabaseAdmin
-    .from('categories')
-    .select('id')
-    .eq('id', parentId)
-    .eq('household_id', householdId)
-    .maybeSingle();
-
-  if (error) {
-    logger.error({ error: error.message }, 'Failed to validate category parent');
-    throw new AppError(500, 'Failed to validate category parent', 'INTERNAL_ERROR');
-  }
-  if (!data) {
+  const repositories = await getInventoryRepositories();
+  if (!(await repositories.categories.findByIdInHousehold(parentId, householdId))) {
     throw new AppError(400, 'The selected parent category is invalid', 'INVALID_PARENT');
   }
 }
 
-// ─── Service Functions ──────────────────────────────────────
-
-/**
- * Get all categories for a household as a nested tree.
- */
-export async function getCategoryTree(householdId: string) {
-  const { data, error } = await supabaseAdmin
-    .from('categories')
-    .select('*')
-    .eq('household_id', householdId)
-    .order('sort_order', { ascending: true });
-
-  if (error) {
-    logger.error({ error: error.message }, 'Failed to fetch categories');
-    throw new AppError(500, 'Failed to fetch categories', 'INTERNAL_ERROR');
+function mapDatabaseError(err: unknown, action: string): never {
+  const message = err instanceof Error ? err.message : String(err);
+  if (message.includes('UNIQUE') || message.includes('unique')) {
+    throw new AppError(409, 'A category with this name already exists at this level', 'DUPLICATE');
   }
-
-  return { tree: buildTree(data as CategoryRow[]) };
+  if (message.includes('FOREIGN KEY') || message.includes('foreign key')) {
+    throw new AppError(400, 'The selected parent category is invalid', 'INVALID_PARENT');
+  }
+  logger.error({ err }, `Failed to ${action} category`);
+  throw new AppError(500, `Failed to ${action} category`, 'INTERNAL_ERROR');
 }
 
-/**
- * Create a new category. DB trigger enforces max 3 levels depth.
- */
+export async function getCategoryTree(householdId: string) {
+  try {
+    const repositories = await getInventoryRepositories();
+    const rows = await repositories.categories.listByHousehold(householdId);
+    return { tree: buildTree(rows as unknown as CategoryRow[]) };
+  } catch (err) {
+    mapDatabaseError(err, 'fetch');
+  }
+}
+
 export async function createCategory(householdId: string, payload: CreateCategorySchema) {
   if (payload.parent_id) await assertParentInHousehold(payload.parent_id, householdId);
-
-  const { data, error } = await supabaseAdmin
-    .from('categories')
-    .insert({
-      household_id: householdId,
+  try {
+    const repositories = await getInventoryRepositories();
+    const row = await repositories.categories.create({
+      householdId,
       name: payload.name,
-      parent_id: payload.parent_id ?? null,
+      parentId: payload.parent_id ?? null,
       icon: payload.icon ?? null,
       color: payload.color ?? null,
-      sort_order: payload.sort_order ?? 0,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    if (error.code === '23514' || error.message.includes('depth')) {
-      throw new AppError(400, 'Maximum category depth (3 levels) exceeded', 'DEPTH_EXCEEDED');
-    }
-    if (error.code === '23503' || error.message.includes('foreign key')) {
-      throw new AppError(400, 'The selected parent category is invalid', 'INVALID_PARENT');
-    }
-    if (
-      error.code === '23505' ||
-      error.message.includes('unique') ||
-      error.message.includes('duplicate')
-    ) {
-      throw new AppError(
-        409,
-        'A category with this name already exists at this level',
-        'DUPLICATE',
-      );
-    }
-    logger.error({ error: error.message }, 'Failed to create category');
-    throw new AppError(500, 'Failed to create category', 'INTERNAL_ERROR');
+      sortOrder: payload.sort_order ?? 0,
+    });
+    if (!row) throw new Error('Category insert returned no row');
+    return { category: mapCategory(row as unknown as CategoryRow) };
+  } catch (err) {
+    mapDatabaseError(err, 'create');
   }
-
-  return { category: mapCategory(data as CategoryRow) };
 }
 
-/**
- * Update a category.
- */
 export async function updateCategory(
   categoryId: string,
   householdId: string,
@@ -155,11 +100,10 @@ export async function updateCategory(
 ) {
   const updateData: Record<string, unknown> = {};
   if (payload.name !== undefined) updateData.name = payload.name;
-  if (payload.parent_id !== undefined) updateData.parent_id = payload.parent_id;
+  if (payload.parent_id !== undefined) updateData.parentId = payload.parent_id;
   if (payload.icon !== undefined) updateData.icon = payload.icon;
   if (payload.color !== undefined) updateData.color = payload.color;
-  if (payload.sort_order !== undefined) updateData.sort_order = payload.sort_order;
-
+  if (payload.sort_order !== undefined) updateData.sortOrder = payload.sort_order;
   if (Object.keys(updateData).length === 0) {
     throw new AppError(400, 'At least one category field is required', 'EMPTY_UPDATE');
   }
@@ -169,49 +113,25 @@ export async function updateCategory(
     }
     await assertParentInHousehold(payload.parent_id, householdId);
   }
-
-  const { data, error } = await supabaseAdmin
-    .from('categories')
-    .update(updateData)
-    .eq('id', categoryId)
-    .eq('household_id', householdId)
-    .select()
-    .single();
-
-  if (error) {
-    if (error.code === '23514' || error.message.includes('depth')) {
-      throw new AppError(400, 'Maximum category depth (3 levels) exceeded', 'DEPTH_EXCEEDED');
-    }
-    if (error.code === '23503' || error.message.includes('foreign key')) {
-      throw new AppError(400, 'The selected parent category is invalid', 'INVALID_PARENT');
-    }
-    if (error.code === 'PGRST116') {
-      throw new AppError(404, 'Category not found', 'NOT_FOUND');
-    }
-    logger.error({ error: error.message }, 'Failed to update category');
-    throw new AppError(500, 'Failed to update category', 'INTERNAL_ERROR');
+  try {
+    const repositories = await getInventoryRepositories();
+    const row = await repositories.categories.update(categoryId, householdId, updateData);
+    if (!row) throw new AppError(404, 'Category not found', 'NOT_FOUND');
+    return { category: mapCategory(row as unknown as CategoryRow) };
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    mapDatabaseError(err, 'update');
   }
-
-  return { category: mapCategory(data as CategoryRow) };
 }
 
-/**
- * Delete a category. CASCADE on DB handles children.
- */
 export async function deleteCategory(categoryId: string, householdId: string) {
-  const { data, error } = await supabaseAdmin
-    .from('categories')
-    .delete()
-    .eq('id', categoryId)
-    .eq('household_id', householdId)
-    .select('id')
-    .maybeSingle();
-
-  if (error) {
-    logger.error({ error: error.message }, 'Failed to delete category');
-    throw new AppError(500, 'Failed to delete category', 'INTERNAL_ERROR');
+  try {
+    const repositories = await getInventoryRepositories();
+    const deleted = await repositories.categories.remove(categoryId, householdId);
+    if (!deleted) throw new AppError(404, 'Category not found', 'NOT_FOUND');
+    return { deleted: true, id: categoryId };
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    mapDatabaseError(err, 'delete');
   }
-  if (!data) throw new AppError(404, 'Category not found', 'NOT_FOUND');
-
-  return { deleted: true, id: categoryId };
 }

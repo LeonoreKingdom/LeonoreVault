@@ -42,7 +42,8 @@ export interface MockItem {
 export interface MockAttachment {
   id: string;
   itemId: string;
-  driveFileId: string;
+  objectKey: string;
+  bucket: string;
   fileName: string;
   mimeType: string;
   thumbnailUrl: string | null;
@@ -428,7 +429,8 @@ export async function mockUploadAttachments(itemId: string, formData: FormData):
   const attachments = files.map((file) => ({
     id: createId('attachment'),
     itemId,
-    driveFileId: `mock/${itemId}/${file.name}`,
+    objectKey: `mock/${itemId}/${file.name}`,
+    bucket: 'mock',
     fileName: file.name,
     mimeType: file.type || 'application/octet-stream',
     thumbnailUrl: null,

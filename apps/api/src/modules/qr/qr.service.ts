@@ -1,63 +1,50 @@
+import { randomUUID } from 'node:crypto';
 import QRCode from 'qrcode';
 import { jsPDF } from 'jspdf';
-import { supabaseAdmin } from '../../config/supabase.js';
+import { objectStorage } from '../../config/object-storage.js';
+import { getInventoryRepositories } from '../../db/repositories/runtime.js';
 import { AppError } from '../../middleware/errorHandler.js';
+import { logger } from '../../middleware/logger.js';
 
 function mapResolvedItem(row: Record<string, unknown>) {
   return {
     id: row.id,
-    qrToken: row.qr_token,
+    qrToken: row.qrToken,
     name: row.name,
     description: row.description ?? null,
-    categoryId: row.category_id ?? null,
-    locationId: row.location_id ?? null,
-    storageSpotId: row.storage_spot_id ?? null,
+    categoryId: row.categoryId ?? null,
+    locationId: row.locationId ?? null,
+    storageSpotId: row.storageSpotId ?? null,
     quantity: row.quantity,
     tags: row.tags ?? [],
     status: row.status,
-    borrowedBy: row.borrowed_by ?? null,
-    borrowDueDate: row.borrow_due_date ?? null,
-    updatedAt: row.updated_at,
+    borrowedBy: row.borrowedBy ?? null,
+    borrowDueDate: row.borrowDueDate ?? null,
+    updatedAt: row.updatedAt,
   };
 }
 
 function mapResolvedSpot(row: Record<string, unknown>) {
   return {
     id: row.id,
-    qrToken: row.qr_token,
+    qrToken: row.qrToken,
     name: row.name,
-    parentId: row.parent_id ?? null,
-    spotType: row.spot_type,
+    parentId: row.parentId ?? null,
+    spotType: row.spotType,
     description: row.description ?? null,
     capacity: row.capacity,
-    sortOrder: row.sort_order,
-    updatedAt: row.updated_at,
+    sortOrder: row.sortOrder,
+    updatedAt: row.updatedAt,
   };
 }
 
 /** Resolve an opaque QR token to a household-scoped item or storage spot. */
 export async function resolveQrToken(householdId: string, token: string) {
-  const [{ data: item, error: itemError }, { data: spot, error: spotError }] = await Promise.all([
-    supabaseAdmin
-      .from('items')
-      .select(
-        'id,qr_token,name,description,category_id,location_id,storage_spot_id,quantity,tags,status,borrowed_by,borrow_due_date,updated_at',
-      )
-      .eq('household_id', householdId)
-      .eq('qr_token', token)
-      .is('deleted_at', null)
-      .maybeSingle(),
-    supabaseAdmin
-      .from('storage_spots')
-      .select('id,qr_token,name,parent_id,spot_type,description,capacity,sort_order,updated_at')
-      .eq('household_id', householdId)
-      .eq('qr_token', token)
-      .maybeSingle(),
+  const repositories = await getInventoryRepositories();
+  const [item, spot] = await Promise.all([
+    repositories.items.findActiveByQrToken(token, householdId),
+    repositories.storageSpots.findByQrToken(token, householdId),
   ]);
-
-  if (itemError || spotError) {
-    throw new AppError(500, 'Failed to resolve QR token', 'INTERNAL_ERROR');
-  }
   if (item && spot) {
     throw new AppError(409, 'QR token matches more than one resource', 'QR_TOKEN_AMBIGUOUS');
   }
@@ -70,9 +57,33 @@ export async function resolveQrToken(householdId: string, token: string) {
 // ─── Config ─────────────────────────────────────────────────
 
 const APP_BASE_URL = 'https://leonorevault.com/app';
+const QR_LABEL_PREFIX = 'qr-labels';
 
 function scanUrl(itemId: string): string {
   return `${APP_BASE_URL}/scan?item=${itemId}`;
+}
+
+async function storeQrLabel(
+  key: string,
+  data: Buffer,
+  contentType: string,
+): Promise<void> {
+  if (!objectStorage.isConfigured) {
+    throw new AppError(503, 'Cloudflare R2 storage is not configured', 'STORAGE_NOT_CONFIGURED');
+  }
+
+  try {
+    await objectStorage.put(key, data, contentType);
+  } catch (err) {
+    logger.error({ err, key }, 'Failed to store QR label in R2');
+    throw new AppError(502, 'Failed to store QR label', 'QR_LABEL_STORAGE_FAILED');
+  }
+}
+
+async function assertItemInHousehold(itemId: string, householdId: string): Promise<void> {
+  const repositories = await getInventoryRepositories();
+  const item = await repositories.items.findById(itemId, householdId);
+  if (!item || item.deletedAt) throw new AppError(404, 'Item not found', 'NOT_FOUND');
 }
 
 // ─── Single QR Code ─────────────────────────────────────────
@@ -81,18 +92,30 @@ function scanUrl(itemId: string): string {
  * Generate a QR code as PNG buffer or SVG string.
  */
 export async function generateQrCode(
+  householdId: string,
   itemId: string,
   format: 'png' | 'svg' = 'png',
   size: number = 256,
 ): Promise<{ data: Buffer | string; contentType: string }> {
+  await assertItemInHousehold(itemId, householdId);
   const url = scanUrl(itemId);
 
   if (format === 'svg') {
     const svg = await QRCode.toString(url, { type: 'svg', width: size, margin: 1 });
+    await storeQrLabel(
+      `${QR_LABEL_PREFIX}/${householdId}/items/${itemId}/qr-${size}.svg`,
+      Buffer.from(svg, 'utf8'),
+      'image/svg+xml',
+    );
     return { data: svg, contentType: 'image/svg+xml' };
   }
 
   const buffer = await QRCode.toBuffer(url, { type: 'png', width: size, margin: 1 });
+  await storeQrLabel(
+    `${QR_LABEL_PREFIX}/${householdId}/items/${itemId}/qr-${size}.png`,
+    buffer,
+    'image/png',
+  );
   return { data: buffer, contentType: 'image/png' };
 }
 
@@ -143,19 +166,15 @@ export async function generateBatchPdf(
   layout: string = 'grid-8',
 ): Promise<Buffer> {
   // Fetch item names
-  const { data: items, error } = await supabaseAdmin
-    .from('items')
-    .select('id, name')
-    .eq('household_id', householdId)
-    .in('id', itemIds)
-    .is('deleted_at', null);
-
-  if (error || !items || items.length === 0) {
+  const repositories = await getInventoryRepositories();
+  const items = await repositories.items.listByIds(itemIds, householdId);
+  if (items.length === 0) {
     throw new Error('Items not found');
   }
 
   const itemMap = new Map(items.map((i: ItemInfo) => [i.id, i.name]));
-  const config: LayoutConfig = LAYOUTS[layout] ?? LAYOUTS['grid-8']!;
+  const selectedLayout = layout in LAYOUTS ? layout : 'grid-8';
+  const config: LayoutConfig = LAYOUTS[selectedLayout]!;
 
   // A4 page dimensions in mm
   const pageW = 210;
@@ -215,5 +234,11 @@ export async function generateBatchPdf(
 
   // Return as Buffer
   const arrayBuffer = doc.output('arraybuffer');
-  return Buffer.from(arrayBuffer);
+  const pdf = Buffer.from(arrayBuffer);
+  await storeQrLabel(
+    `${QR_LABEL_PREFIX}/${householdId}/batches/${randomUUID()}-${selectedLayout}.pdf`,
+    pdf,
+    'application/pdf',
+  );
+  return pdf;
 }

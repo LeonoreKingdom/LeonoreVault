@@ -3,27 +3,50 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./next-handler": {
+      "types": "./dist/next-handler.d.ts",
+      "import": "./dist/next-handler.js"
+    },
+    "./auth": {
+      "types": "./dist/config/better-auth.d.ts",
+      "import": "./dist/config/better-auth.js"
+    },
+    "./database": {
+      "types": "./dist/db/client.d.ts",
+      "import": "./dist/db/client.js"
+    }
+  },
   "scripts": {
-    "dev": "tsx watch --env-file=../../.env src/index.ts",
     "build": "tsc --build",
-    "start": "node --env-file=../../.env dist/index.js",
     "lint": "eslint src/ --ext .ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate --config=drizzle.config.ts",
     "db:migrate": "drizzle-kit migrate --config=drizzle.config.ts",
+    "db:migrate:backup": "tsx --env-file=../../.env scripts/migrate-postgres-backup-to-turso.ts",
+    "db:migrate:auth": "tsx --env-file=../../.env scripts/migrate-auth-accounts-to-better-auth.ts",
+    "db:migrate:history": "tsx --env-file=../../.env scripts/migrate-borrowing-and-session-history.ts",
+    "db:migrate:attachments:r2": "tsx --env-file=../../.env scripts/migrate-legacy-attachments-to-r2.ts",
+    "db:validate:migration": "tsx --env-file=../../.env scripts/validate-migration.ts",
     "db:push": "drizzle-kit push --config=drizzle.config.ts",
     "db:check": "drizzle-kit check --config=drizzle.config.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1111.0",
+    "@aws-sdk/s3-request-presigner": "3.1111.0",
+    "@better-auth/drizzle-adapter": "1.6.29",
     "@leonorevault/shared": "workspace:*",
     "@libsql/client": "0.17.4",
-    "@supabase/supabase-js": "^2.49.0",
+    "better-auth": "1.6.29",
     "cors": "^2.8.5",
     "dotenv": "^16.4.0",
     "drizzle-orm": "0.45.2",
     "express": "^5.1.0",
-    "googleapis": "^171.4.0",
     "helmet": "^8.0.0",
     "jspdf": "^4.1.0",
     "multer": "^2.0.2",

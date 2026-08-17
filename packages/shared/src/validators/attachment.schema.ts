@@ -7,9 +7,12 @@ import { uuidSchema, timestampSchema } from './user.schema.js';
 export const attachmentSchema = z.object({
   id: uuidSchema,
   item_id: uuidSchema,
-  drive_file_id: z.string().min(1),
+  bucket: z.string().min(1),
+  object_key: z.string().min(1),
   file_name: z.string().min(1).max(255),
   mime_type: z.string().min(1),
+  size_bytes: z.number().int().nonnegative(),
+  thumbnail_key: z.string().nullable(),
   thumbnail_url: z.string().nullable(),
   web_view_link: z.string().nullable(),
   created_by: uuidSchema,

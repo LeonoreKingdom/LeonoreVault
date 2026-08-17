@@ -1,76 +1,81 @@
 import { randomUUID } from 'node:crypto';
-import { supabaseAdmin } from '../../config/supabase.js';
+import type { LinkAttachmentSchema } from '@leonorevault/shared';
+import {
+  objectStorage,
+  R2_SIGNED_URL_TTL_SECONDS,
+} from '../../config/object-storage.js';
+import { getInventoryRepositories } from '../../db/repositories/runtime.js';
 import { AppError } from '../../middleware/errorHandler.js';
 import { logger } from '../../middleware/logger.js';
-import { MAX_ATTACHMENTS_PER_ITEM } from '@leonorevault/shared';
-import type { LinkAttachmentSchema } from '@leonorevault/shared';
 
-// ─── Constants ───────────────────────────────────────────────
+const MAX_ATTACHMENTS_PER_ITEM = 10;
 
-const STORAGE_BUCKET = 'attachments';
-
-// ─── Types ──────────────────────────────────────────────────
-
-interface Attachment {
+interface AttachmentResult {
   id: string;
   itemId: string;
-  driveFileId: string;
+  objectKey: string;
+  bucket: string;
   fileName: string;
   mimeType: string;
+  thumbnailKey: string | null;
   thumbnailUrl: string | null;
   webViewLink: string | null;
   createdBy: string;
-  createdAt: string;
+  createdAt: Date;
 }
 
-function toCamelCase(row: Record<string, unknown>): Attachment {
+function mapAttachment(row: Record<string, unknown>): AttachmentResult {
+  const bucket = row.bucket as string;
+  const objectKey = row.objectKey as string;
+  const externalUrl = bucket === 'external' ? objectKey : null;
+  const objectUrl = bucket === objectStorage.bucket ? objectStorage.publicUrl(objectKey) : null;
+  const thumbnailKey = (row.thumbnailKey as string) ?? null;
   return {
     id: row.id as string,
-    itemId: row.item_id as string,
-    driveFileId: row.drive_file_id as string,
-    fileName: row.file_name as string,
-    mimeType: row.mime_type as string,
-    thumbnailUrl: (row.thumbnail_url as string) ?? null,
-    webViewLink: (row.web_view_link as string) ?? null,
-    createdBy: row.created_by as string,
-    createdAt: row.created_at as string,
+    itemId: row.itemId as string,
+    objectKey,
+    bucket,
+    fileName: row.fileName as string,
+    mimeType: row.mimeType as string,
+    thumbnailKey,
+    thumbnailUrl: thumbnailKey ? objectStorage.publicUrl(thumbnailKey) : null,
+    webViewLink: externalUrl ?? objectUrl,
+    createdBy: row.createdBy as string,
+    createdAt: row.createdAt as Date,
   };
 }
 
-async function assertItemInHousehold(itemId: string, householdId: string) {
-  const { data, error } = await supabaseAdmin
-    .from('items')
-    .select('id')
-    .eq('id', itemId)
-    .eq('household_id', householdId)
-    .is('deleted_at', null)
-    .maybeSingle();
-
-  if (error) {
-    logger.error(
-      { error: error.message, itemId, householdId },
-      'Failed to validate item for attachment',
-    );
-    throw new AppError(500, 'Failed to validate item', 'INTERNAL_ERROR');
+async function mapAttachmentWithUrls(row: Record<string, unknown>): Promise<AttachmentResult> {
+  const attachment = mapAttachment(row);
+  if (attachment.bucket !== objectStorage.bucket || !objectStorage.isConfigured) {
+    return attachment;
   }
-  if (!data) throw new AppError(404, 'Item not found', 'NOT_FOUND');
+
+  const [webViewLink, thumbnailUrl] = await Promise.all([
+    objectStorage.signedUrl(attachment.objectKey, {
+      contentType: attachment.mimeType,
+      fileName: attachment.fileName,
+    }),
+    attachment.thumbnailKey
+      ? objectStorage.signedUrl(attachment.thumbnailKey, {
+          contentType: attachment.mimeType,
+          fileName: attachment.fileName,
+        })
+      : Promise.resolve(null),
+  ]);
+
+  return { ...attachment, thumbnailUrl, webViewLink };
 }
 
-async function getAttachmentCount(itemId: string) {
-  const { count, error } = await supabaseAdmin
-    .from('attachments')
-    .select('id', { count: 'exact', head: true })
-    .eq('item_id', itemId);
-
-  if (error) {
-    logger.error({ error: error.message, itemId }, 'Failed to count item attachments');
-    throw new AppError(500, 'Failed to check attachment limit', 'INTERNAL_ERROR');
-  }
-  return count ?? 0;
+async function assertItemInHousehold(itemId: string, householdId: string) {
+  const repositories = await getInventoryRepositories();
+  const item = await repositories.items.findById(itemId, householdId);
+  if (!item || item.deletedAt) throw new AppError(404, 'Item not found', 'NOT_FOUND');
 }
 
 async function assertAttachmentCapacity(itemId: string, additionalCount: number) {
-  const currentCount = await getAttachmentCount(itemId);
+  const repositories = await getInventoryRepositories();
+  const currentCount = await repositories.attachments.countByItem(itemId);
   if (currentCount + additionalCount > MAX_ATTACHMENTS_PER_ITEM) {
     throw new AppError(
       400,
@@ -85,214 +90,134 @@ function safeFileName(fileName: string) {
   return (safe || 'upload').slice(0, 255);
 }
 
-// ─── Upload Files to Supabase Storage ───────────────────────
-
-/**
- * Uploads files to Supabase Storage and creates attachment records.
- */
 export async function uploadFiles(
   householdId: string,
   itemId: string,
   userId: string,
   files: Express.Multer.File[],
-): Promise<Attachment[]> {
+): Promise<AttachmentResult[]> {
   await assertItemInHousehold(itemId, householdId);
-
   await assertAttachmentCapacity(itemId, files.length);
-
-  const results: Attachment[] = [];
-  const uploadedPaths: string[] = [];
-  const createdAttachmentIds: string[] = [];
-
+  if (!objectStorage.isConfigured) {
+    throw new AppError(503, 'Cloudflare R2 storage is not configured', 'STORAGE_NOT_CONFIGURED');
+  }
+  const repositories = await getInventoryRepositories();
+  const uploadedKeys: string[] = [];
+  const created: AttachmentResult[] = [];
   try {
     for (const file of files) {
-      // Build a unique storage path: householdId/itemId/uuid_originalname
-      const fileName = safeFileName(file.originalname);
-      const uniqueName = `${randomUUID()}_${fileName}`;
-      const storagePath = `${householdId}/${itemId}/${uniqueName}`;
-      uploadedPaths.push(storagePath);
-
-      // Upload to Supabase Storage
-      const { error: uploadError } = await supabaseAdmin.storage
-        .from(STORAGE_BUCKET)
-        .upload(storagePath, file.buffer, {
-          contentType: file.mimetype,
-          upsert: false,
-        });
-
-      if (uploadError) {
-        logger.error(
-          { error: uploadError, fileName: file.originalname },
-          'Supabase Storage upload failed',
-        );
-        throw new Error(uploadError.message);
+      const key = `${householdId}/${itemId}/${randomUUID()}_${safeFileName(file.originalname)}`;
+      await objectStorage.put(key, file.buffer, file.mimetype);
+      uploadedKeys.push(key);
+      const row = await repositories.attachments.create({
+        itemId,
+        bucket: objectStorage.bucket,
+        objectKey: key,
+        fileName: safeFileName(file.originalname),
+        mimeType: file.mimetype,
+        sizeBytes: file.size,
+        thumbnailKey: null,
+        createdBy: userId,
+      });
+      if (!row) throw new Error('Attachment insert returned no row');
+      created.push(await mapAttachmentWithUrls(row as unknown as Record<string, unknown>));
+    }
+    return created;
+  } catch (err) {
+    logger.error({ err, itemId }, 'File upload failed');
+    for (const row of created) await repositories.attachments.remove(row.id, itemId);
+    for (const key of uploadedKeys) {
+      try {
+        await objectStorage.remove(key);
+      } catch (cleanupError) {
+        logger.warn({ cleanupError, key }, 'Failed to clean up R2 object after upload failure');
       }
-
-      // Get public URL
-      const { data: urlData } = supabaseAdmin.storage
-        .from(STORAGE_BUCKET)
-        .getPublicUrl(storagePath);
-
-      const publicUrl = urlData.publicUrl;
-
-      // Build thumbnail URL for images (Supabase image transformations)
-      const thumbnailUrl = file.mimetype.startsWith('image/')
-        ? `${publicUrl}?width=200&height=200&resize=contain`
-        : null;
-
-      // Insert into DB — reuse drive_file_id column for storage path
-      const { data, error } = await supabaseAdmin
-        .from('attachments')
-        .insert({
-          item_id: itemId,
-          drive_file_id: storagePath,
-          file_name: fileName,
-          mime_type: file.mimetype,
-          thumbnail_url: thumbnailUrl,
-          web_view_link: publicUrl,
-          created_by: userId,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        logger.error({ error, fileName: file.originalname }, 'Failed to insert attachment');
-        throw new Error(error.message);
-      }
-
-      createdAttachmentIds.push(data.id as string);
-      results.push(toCamelCase(data));
     }
-  } catch (err: unknown) {
-    logger.error({ err, step: 'uploadFiles', itemId }, 'File upload failed');
-
-    if (createdAttachmentIds.length > 0) {
-      await supabaseAdmin.from('attachments').delete().in('id', createdAttachmentIds);
-    }
-    if (uploadedPaths.length > 0) {
-      await supabaseAdmin.storage.from(STORAGE_BUCKET).remove(uploadedPaths);
-    }
-
     if (err instanceof AppError) throw err;
     throw new AppError(502, 'Failed to upload attachment', 'UPLOAD_FAILED');
   }
-
-  return results;
 }
 
-// ─── Link External URL ─────────────────────────────────────
-
-/**
- * Creates an attachment record for an external URL (no file upload).
- */
 export async function linkExternalAttachment(
   householdId: string,
   itemId: string,
   userId: string,
   payload: LinkAttachmentSchema,
-): Promise<Attachment> {
+): Promise<AttachmentResult> {
   await assertItemInHousehold(itemId, householdId);
   await assertAttachmentCapacity(itemId, 1);
-
-  // Extract a drive file ID or use the URL itself
-  const driveFileId = extractDriveId(payload.url) || payload.url;
-
-  const { data, error } = await supabaseAdmin
-    .from('attachments')
-    .insert({
-      item_id: itemId,
-      drive_file_id: driveFileId,
-      file_name: payload.fileName,
-      mime_type: payload.mimeType || 'application/vnd.google-apps.document',
-      thumbnail_url: null,
-      web_view_link: payload.url,
-      created_by: userId,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    logger.error({ error: error.message, itemId }, 'Failed to link attachment');
-    throw new AppError(500, 'Failed to link attachment', 'INTERNAL_ERROR');
-  }
-  return toCamelCase(data);
+  const repositories = await getInventoryRepositories();
+  const row = await repositories.attachments.create({
+    itemId,
+    bucket: 'external',
+    objectKey: payload.url,
+    fileName: payload.fileName,
+    mimeType: payload.mimeType || 'application/octet-stream',
+    sizeBytes: 0,
+    thumbnailKey: null,
+    createdBy: userId,
+  });
+  if (!row) throw new AppError(500, 'Failed to link attachment', 'INTERNAL_ERROR');
+  return mapAttachment(row as unknown as Record<string, unknown>);
 }
 
-/**
- * Extracts Google Drive file ID from a URL if possible.
- */
-function extractDriveId(url: string): string | null {
-  const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-  return match?.[1] ?? null;
-}
-
-// ─── List Attachments ───────────────────────────────────────
-
-/**
- * Returns all attachments for an item.
- */
-export async function getAttachments(itemId: string, householdId: string): Promise<Attachment[]> {
+export async function getAttachments(itemId: string, householdId: string): Promise<AttachmentResult[]> {
   await assertItemInHousehold(itemId, householdId);
-
-  const { data, error } = await supabaseAdmin
-    .from('attachments')
-    .select('*')
-    .eq('item_id', itemId)
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    logger.error({ error: error.message, itemId }, 'Failed to list attachments');
-    throw new AppError(500, 'Failed to list attachments', 'INTERNAL_ERROR');
-  }
-  return (data || []).map(toCamelCase);
+  const repositories = await getInventoryRepositories();
+  const rows = await repositories.attachments.listByItem(itemId);
+  return Promise.all(
+    rows.map((row) => mapAttachmentWithUrls(row as unknown as Record<string, unknown>)),
+  );
 }
 
-// ─── Delete Attachment ──────────────────────────────────────
+export async function getAttachmentUrl(
+  attachmentId: string,
+  itemId: string,
+  householdId: string,
+  variant: 'original' | 'thumbnail' = 'original',
+) {
+  await assertItemInHousehold(itemId, householdId);
+  const repositories = await getInventoryRepositories();
+  const attachment = await repositories.attachments.findById(attachmentId);
+  if (!attachment || attachment.itemId !== itemId) {
+    throw new AppError(404, 'Attachment not found', 'NOT_FOUND');
+  }
 
-/**
- * Deletes an attachment from DB and attempts to delete from Supabase Storage.
- */
+  if (attachment.bucket === 'external') {
+    return { url: attachment.objectKey, expiresIn: null, variant };
+  }
+  if (attachment.bucket !== objectStorage.bucket || !objectStorage.isConfigured) {
+    throw new AppError(503, 'Cloudflare R2 storage is not configured', 'STORAGE_NOT_CONFIGURED');
+  }
+
+  const key = variant === 'thumbnail' ? attachment.thumbnailKey : attachment.objectKey;
+  if (!key) throw new AppError(404, 'Attachment variant not found', 'NOT_FOUND');
+
+  const url = await objectStorage.signedUrl(key, {
+    contentType: attachment.mimeType,
+    fileName: attachment.fileName,
+  });
+  return { url, expiresIn: R2_SIGNED_URL_TTL_SECONDS, variant };
+}
+
 export async function removeAttachment(
   attachmentId: string,
   householdId: string,
 ): Promise<{ deleted: true; storageFileDeleted: boolean }> {
-  // 1. Fetch the record
-  const { data: attachment, error: fetchErr } = await supabaseAdmin
-    .from('attachments')
-    .select('drive_file_id,item_id')
-    .eq('id', attachmentId)
-    .single();
-
-  if (fetchErr || !attachment) throw new AppError(404, 'Attachment not found', 'NOT_FOUND');
-
-  await assertItemInHousehold(attachment.item_id as string, householdId);
-
-  // 2. Delete from DB
-  const { error: deleteErr } = await supabaseAdmin
-    .from('attachments')
-    .delete()
-    .eq('id', attachmentId);
-
-  if (deleteErr) {
-    logger.error({ error: deleteErr.message, attachmentId }, 'Failed to delete attachment');
-    throw new AppError(500, 'Failed to delete attachment', 'INTERNAL_ERROR');
-  }
-
-  // 3. Attempt to delete from Supabase Storage (non-blocking)
+  const repositories = await getInventoryRepositories();
+  const attachment = await repositories.attachments.findById(attachmentId);
+  if (!attachment) throw new AppError(404, 'Attachment not found', 'NOT_FOUND');
+  await assertItemInHousehold(attachment.itemId, householdId);
+  const removed = await repositories.attachments.remove(attachmentId, attachment.itemId);
+  if (!removed) throw new AppError(404, 'Attachment not found', 'NOT_FOUND');
   let storageFileDeleted = false;
-  try {
-    const storagePath = attachment.drive_file_id;
-    // Only attempt storage delete if it looks like a storage path (not a URL)
-    if (storagePath && !storagePath.startsWith('http')) {
-      const { error: removeError } = await supabaseAdmin.storage
-        .from(STORAGE_BUCKET)
-        .remove([storagePath]);
-      if (!removeError) storageFileDeleted = true;
+  if (attachment.bucket === objectStorage.bucket && objectStorage.isConfigured) {
+    try {
+      await objectStorage.remove(attachment.objectKey);
+      storageFileDeleted = true;
+    } catch (err) {
+      logger.warn({ err, attachmentId }, 'Failed to delete R2 object after attachment removal');
     }
-  } catch (err) {
-    // Non-blocking — the DB record is already deleted
-    logger.warn({ err, attachmentId }, 'Failed to delete file from Supabase Storage');
   }
-
   return { deleted: true, storageFileDeleted };
 }

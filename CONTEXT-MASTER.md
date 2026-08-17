@@ -1,43 +1,44 @@
 # CONTEXT-MASTER.md
 
 **Project:** LeonoreVault
-**Last Updated:** 2026-02-08
+**Last Updated:** 2026-08-17
 
 ---
 
 ## Quick Summary
 
-LeonoreVault is a comprehensive household inventory and management system designed for high-net-worth individuals to track physical assets, valuables, and important documents across multiple properties. It supports deep hierarchical organization, Google Drive integration for secure attachments, QR code labeling, and offline-first capabilities for uninterrupted access in secure locations.
+LeonoreVault is a household inventory and management system for tracking physical assets, valuables, and important documents across multiple properties. It supports hierarchical organization, Cloudflare R2 attachments, QR code labeling, and offline-first capabilities for uninterrupted access in secure locations.
 
 ## Tech Stack
 
-- **Frontend:** Next.js 15 (App Router), React 19, Tailwind CSS 4, Zustand
-- **Backend:** Express.js 5, Node.js, TypeScript
-- **Database:** Supabase (PostgreSQL 15), Dexie.js (Offline)
-- **Auth:** Supabase Auth (Google OAuth + PKCE)
-- **External Services:** Google Drive API v3 (Storage)
+- **Frontend:** Next.js 16 (App Router), React 19, Tailwind CSS 4, Zustand
+- **Backend:** Next.js 16 App Router route handlers on Vercel, with an internal Express.js 5 compatibility adapter for unmigrated modules
+- **Database:** Turso (libSQL/SQLite) with Drizzle ORM, Dexie.js (offline cache)
+- **Auth:** Better Auth with email/password and optional Google OAuth
+- **Object Storage:** Cloudflare R2 via the S3-compatible API
+- **Edge Security:** Cloudflare WAF/rate limiting for MyKisah media and Leonore Vault critical endpoints
 - **Architecture:** Monorepo (pnpm workspaces), Offline-First Sync Engine
 
 ## Core Features (MVP)
 
 1. **Asset Tracking:** Detailed inventory management with rich metadata, photos, and status tracking (stored/borrowed/lost).
 2. **Smart Organization:** Nested categories and locations (up to 3 levels) with drag-and-drop management.
-3. **Secure Attachments:** Integration with Google Drive for storing receipts, appraisals, and warranties.
+3. **Secure Attachments:** Cloudflare R2 storage for receipts, appraisals, and warranties.
 4. **QR Labeling:** Generation of QR codes for physical item tagging and instant lookup.
 5. **Offline Sync:** Robust offline read/write support with background conflict resolution and sync.
 
 ## Key Data Models
 
 - **User:** `id`, `email`, `display_name`, `avatar_url`
-- **Household:** `id`, `name`, `invite_code`, `drive_folder_id`
+- **Household:** `id`, `name`, `invite_code`
 - **Item:** `id`, `name`, `category_id`, `location_id`, `status`
 - **Category:** `id`, `name`, `parent_id`, `icon`
 - **Location:** `id`, `name`, `parent_id`, `description`
-- **Attachment:** `id`, `item_id`, `drive_file_id`, `web_view_link`
+- **Attachment:** `id`, `item_id`, `bucket`, `object_key`, `web_view_link`
 
 ## Main API Endpoints
 
-- `POST /auth/google/callback` - Handling Google OAuth and session creation
+- `POST /api/auth/sign-in/social` - Better Auth Google OAuth initiation
 - `GET /items` - Paginated list of inventory items with filters
 - `GET /categories/tree` - Hierarchical view of categories
 - `POST /households` - Create new household scope
@@ -65,8 +66,8 @@ LeonoreVault is a comprehensive household inventory and management system design
 
 ## Key Decisions Made
 
-1. **Separate Express Backend:** Chosen over Next.js API routes to handle complex sync logic and long-running background tasks more effectively.
-2. **Google Drive Storage:** Utilizing the user's existing Google ecosystem for file storage to minimize vendor lock-in and leverage existing storage plans.
+1. **Vercel-native API entrypoint:** Next.js route handlers own the production and local `/api` entrypoint. Express is retained only as an internal compatibility adapter and never starts its own listener.
+2. **Turso + R2:** Turso is the production SQLite-compatible database and R2 is the production object store; Google is used only as an optional OAuth provider.
 3. **pnpm Workspaces:** Enforcing clean separation of concerns between `web`, `api`, and `shared` packages.
 4. **Offline-First:** Prioritizing local-first interaction using Dexie.js to ensure speed and availability in connection-limited environments (e.g., basements, vaults).
 

@@ -49,7 +49,7 @@ const validationChecks: ValidationCheck[] = [
   {
     id: 'auth-boundary',
     label: 'Auth boundary',
-    detail: 'The frontend no longer depends on a Supabase client or Render API URL.',
+    detail: 'The frontend uses same-origin Vercel route handlers with Better Auth sessions.',
     value: 'Verified locally',
     status: 'ready',
     icon: LockKeyhole,

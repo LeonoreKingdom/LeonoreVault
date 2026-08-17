@@ -19,4 +19,3 @@ export type {
   PaginationParams,
   ItemFilterParams,
 } from './api.js';
-export type { Database, Json, Tables, TablesInsert, TablesUpdate } from './database.js';

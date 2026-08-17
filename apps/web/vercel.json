@@ -1,5 +1,5 @@
 {
-  "installCommand": "cd ../.. && pnpm install --frozen-lockfile",
-  "buildCommand": "cd ../.. && pnpm --filter @leonorevault/shared build && cd apps/web && next build",
+  "installCommand": "pnpm install --frozen-lockfile --ignore-scripts --prod=false",
+  "buildCommand": "cd ../.. && pnpm --filter @leonorevault/shared build && pnpm --filter @leonorevault/api build && pnpm --filter @leonorevault/web build",
   "framework": "nextjs"
 }

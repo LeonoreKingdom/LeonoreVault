@@ -10,7 +10,6 @@ export interface Household {
   created_by: string;
   invite_code: string | null;
   invite_expires_at: string | null;
-  drive_folder_id: string | null;
   created_at: string;
 }
 

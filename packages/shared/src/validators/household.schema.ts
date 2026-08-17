@@ -16,7 +16,6 @@ export const householdSchema = z.object({
     .regex(/^[A-Z0-9]+$/, 'Must be uppercase alphanumeric')
     .nullable(),
   invite_expires_at: timestampSchema.nullable(),
-  drive_folder_id: z.string().nullable(),
   created_at: timestampSchema,
 });
 

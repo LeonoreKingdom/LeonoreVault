@@ -1,55 +1,57 @@
 'use client';
 
 import { create } from 'zustand';
-import {
-  mockGetSession,
-  mockSignIn,
-  mockSignInWithEmail,
-  mockSignUp,
-  mockSignOut,
-  type MockAuthUser,
-  type MockMembership,
-} from '@/lib/mock-service';
+import { apiFetch, apiGet } from '@/lib/api';
 
-export type AuthUser = MockAuthUser;
-export type Membership = MockMembership;
+export interface AuthUser {
+  id: string;
+  email: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface Membership {
+  id: string;
+  userId: string;
+  householdId: string;
+  role: 'admin' | 'member' | 'viewer';
+  joinedAt: string;
+}
+
+interface CurrentUserResponse {
+  user: AuthUser;
+  membership: Membership | null;
+}
 
 interface AuthState {
-  /** Current authenticated user */
   user: AuthUser | null;
-  /** User's household membership */
   membership: Membership | null;
-  /** Whether initial auth check is in progress */
   loading: boolean;
-  /** Whether user is authenticated */
   isAuthenticated: boolean;
-
-  /** Initialize auth state — call on app mount */
   initialize: () => Promise<void>;
-  /** Sign in with the local mock provider */
   signInWithGoogle: () => Promise<void>;
-  /** Sign in with local mock credentials */
   signInWithEmail: (email: string, password: string) => Promise<void>;
-  /** Create an account with local mock credentials */
   signUpWithEmail: (name: string, email: string, password: string) => Promise<void>;
-  /** Sign out and clear state */
   signOut: () => Promise<void>;
-  /** Fetch current user profile from the local service */
   fetchProfile: () => Promise<void>;
-  /** Set user directly (e.g., from callback) */
   setUser: (user: AuthUser | null) => void;
-  /** Set membership directly */
   setMembership: (membership: Membership | null) => void;
 }
 
-function applySession(
+async function loadCurrentUser(): Promise<CurrentUserResponse> {
+  return apiGet<CurrentUserResponse>('/api/auth/me');
+}
+
+async function applyCurrentUser(
   set: (state: Partial<AuthState>) => void,
-  session: Awaited<ReturnType<typeof mockGetSession>>,
-) {
+): Promise<void> {
+  const current = await loadCurrentUser();
   set({
-    user: session?.user ?? null,
-    membership: session?.membership ?? null,
-    isAuthenticated: Boolean(session),
+    user: current.user,
+    membership: current.membership,
+    isAuthenticated: true,
     loading: false,
   });
 }
@@ -62,37 +64,54 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   initialize: async () => {
     try {
-      applySession(set, await mockGetSession());
+      await applyCurrentUser(set);
     } catch {
       set({ user: null, membership: null, isAuthenticated: false, loading: false });
     }
   },
 
   signInWithGoogle: async () => {
-    applySession(set, await mockSignIn());
+    const callbackURL = `${window.location.origin}/auth/callback`;
+    const result = await apiFetch<{ url?: string; redirect?: boolean }>(
+      '/api/auth/sign-in/social',
+      {
+        method: 'POST',
+        body: { provider: 'google', callbackURL },
+      },
+    );
+    if (!result.url) throw new Error('Google sign-in URL was not returned');
+    window.location.assign(result.url);
   },
 
   signInWithEmail: async (email, password) => {
-    applySession(set, await mockSignInWithEmail(email, password));
+    await apiFetch('/api/auth/sign-in/email', {
+      method: 'POST',
+      body: { email, password, rememberMe: true },
+    });
+    await applyCurrentUser(set);
   },
 
   signUpWithEmail: async (name, email, password) => {
-    applySession(set, await mockSignUp(name, email, password));
+    await apiFetch('/api/auth/sign-up/email', {
+      method: 'POST',
+      body: { name, email, password, callbackURL: window.location.origin },
+    });
+    await applyCurrentUser(set);
   },
 
   signOut: async () => {
-    await mockSignOut();
+    await apiFetch('/api/auth/sign-out', { method: 'POST' });
     set({ user: null, membership: null, isAuthenticated: false, loading: false });
   },
 
   fetchProfile: async () => {
     try {
-      applySession(set, await mockGetSession());
+      await applyCurrentUser(set);
     } catch {
-      // Keep the current local identity when the mock service is unavailable.
+      set({ user: null, membership: null, isAuthenticated: false, loading: false });
     }
   },
 
-  setUser: (user) => set({ user, isAuthenticated: !!user }),
+  setUser: (user) => set({ user, isAuthenticated: Boolean(user) }),
   setMembership: (membership) => set({ membership }),
 }));

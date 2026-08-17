@@ -18,7 +18,17 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { useAuthStore } from '@/stores/auth';
 import { apiGet } from '@/lib/api';
-import type { MockItem } from '@/lib/mock-service';
+
+type ApiItem = {
+  id: string;
+  name: string;
+  categoryId: string | null;
+  locationId: string | null;
+  status: 'stored' | 'borrowed' | 'lost' | 'in_lost_found';
+  recentlyReturned?: string;
+  borrowedBy: string | null;
+  borrowDueDate: string | null;
+};
 
 type ItemStatus = 'in-storage' | 'checked-out';
 
@@ -66,7 +76,7 @@ function dueLabel(isoDate: string | null): string | undefined {
   return days === 1 ? 'Due tomorrow' : `Due in ${days} days`;
 }
 
-function toInventoryItem(item: MockItem): InventoryItem {
+function toInventoryItem(item: ApiItem): InventoryItem {
   return {
     id: item.id,
     name: item.name,
@@ -92,10 +102,19 @@ export default function DashboardPage() {
     let cancelled = false;
     const householdId = membership?.householdId;
 
-    apiGet<{ items: MockItem[] }>(
-      householdId ? `/api/households/${householdId}/items` : '/api/households/casa-leonore/items',
-      { page: '1', limit: '20', sort: 'updated_at', order: 'desc' },
-    )
+    if (!householdId) {
+      setMockItems([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    apiGet<{ items: ApiItem[] }>(`/api/households/${householdId}/items`, {
+      page: '1',
+      limit: '20',
+      sort: 'updated_at',
+      order: 'desc',
+    })
       .then((data) => {
         if (cancelled) return;
         setMockItems(data.items.map(toInventoryItem));

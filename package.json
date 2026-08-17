@@ -8,9 +8,9 @@
     "url": "git+https://github.com/LeonoreKingdom/LeonoreVault.git"
   },
   "scripts": {
-    "dev": "pnpm --parallel -r run dev",
-    "dev:web": "pnpm --filter @leonorevault/web dev",
-    "dev:api": "pnpm --filter @leonorevault/api dev",
+    "bootstrap": "pnpm --filter @leonorevault/shared build && pnpm --filter @leonorevault/api build",
+    "dev": "pnpm run bootstrap && pnpm --filter @leonorevault/web dev",
+    "dev:web": "pnpm run bootstrap && pnpm --filter @leonorevault/web dev",
     "build": "pnpm -r run build",
     "build:web": "pnpm --filter @leonorevault/web build",
     "build:api": "pnpm --filter @leonorevault/api build",

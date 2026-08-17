@@ -5,6 +5,7 @@ import { linkAttachmentSchema } from '@leonorevault/shared';
 import { validate } from '../../middleware/validate.js';
 import { requireAuth, requireRole } from '../../middleware/auth.js';
 import { AppError } from '../../middleware/errorHandler.js';
+import { expensiveMutationRateLimiter } from '../../middleware/rateLimit.js';
 import * as ctrl from './attachment.controller.js';
 
 // ─── Multer Config ──────────────────────────────────────────
@@ -57,9 +58,10 @@ export const attachmentRouter: IRouter = Router({ mergeParams: true });
 
 attachmentRouter.use(requireAuth);
 
-// POST upload — multipart file upload to Supabase Storage
+// POST upload — multipart file upload to Cloudflare R2
 attachmentRouter.post(
   '/upload',
+  expensiveMutationRateLimiter,
   requireRole(['admin', 'member'], 'householdId'),
   upload.array('files', MAX_FILES),
   handleUploadError,
@@ -79,6 +81,13 @@ attachmentRouter.get(
   '/',
   requireRole(['admin', 'member', 'viewer'], 'householdId'),
   ctrl.listAttachments,
+);
+
+// GET signed URL — authorize access before issuing a short-lived R2 URL
+attachmentRouter.get(
+  '/:attachmentId/url',
+  requireRole(['admin', 'member', 'viewer'], 'householdId'),
+  ctrl.getAttachmentUrl,
 );
 
 // DELETE — remove an attachment

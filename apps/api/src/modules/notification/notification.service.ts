@@ -1,128 +1,83 @@
-import type {
-  NotificationListQuerySchema,
-  NotificationPreferenceSchema,
-  Json,
-} from '@leonorevault/shared';
-import { supabaseAdmin } from '../../config/supabase.js';
+import type { NotificationListQuerySchema, NotificationPreferenceSchema } from '@leonorevault/shared';
+import { getInventoryRepositories } from '../../db/repositories/runtime.js';
 import { AppError } from '../../middleware/errorHandler.js';
 import { logger } from '../../middleware/logger.js';
 
 function mapNotification(row: Record<string, unknown>) {
   return {
     id: row.id,
-    userId: row.user_id,
-    householdId: row.household_id,
-    itemId: row.item_id ?? null,
-    notificationType: row.notification_type,
+    userId: row.userId,
+    householdId: row.householdId,
+    itemId: row.itemId ?? null,
+    notificationType: row.notificationType,
     title: row.title,
     body: row.body ?? null,
     data: row.data ?? {},
-    readAt: row.read_at ?? null,
-    createdAt: row.created_at,
+    readAt: row.readAt ?? null,
+    createdAt: row.createdAt,
   };
 }
 
 function mapNotificationPreferences(row: Record<string, unknown>) {
   return {
-    userId: row.user_id,
-    dueSoonEnabled: row.due_soon_enabled,
-    overdueEnabled: row.overdue_enabled,
-    returnsEnabled: row.returns_enabled,
-    itemUpdatesEnabled: row.item_updates_enabled,
-    householdActivityEnabled: row.household_activity_enabled,
-    weeklySummaryEnabled: row.weekly_summary_enabled,
-    pauseAll: row.pause_all,
-    updatedAt: row.updated_at,
+    userId: row.userId,
+    dueSoonEnabled: row.dueSoonEnabled,
+    overdueEnabled: row.overdueEnabled,
+    returnsEnabled: row.returnsEnabled,
+    itemUpdatesEnabled: row.itemUpdatesEnabled,
+    householdActivityEnabled: row.householdActivityEnabled,
+    weeklySummaryEnabled: row.weeklySummaryEnabled,
+    pauseAll: row.pauseAll,
+    updatedAt: row.updatedAt,
   };
 }
 
-/** List the authenticated user's newest notifications with optional unread filtering. */
 export async function listNotifications(userId: string, query: NotificationListQuerySchema) {
-  const { page, limit, unread_only: unreadOnly } = query;
-  const offset = (page - 1) * limit;
-
-  let request = supabaseAdmin
-    .from('notifications')
-    .select('*', { count: 'exact' })
-    .eq('user_id', userId);
-
-  if (unreadOnly) request = request.is('read_at', null);
-
-  const { data, error, count } = await request
-    .order('created_at', { ascending: false })
-    .range(offset, offset + limit - 1);
-
-  if (error) {
-    logger.error({ error: error.message, userId }, 'Failed to list notifications');
-    throw new AppError(500, 'Failed to fetch notifications', 'INTERNAL_ERROR');
-  }
-
+  const offset = (query.page - 1) * query.limit;
+  const repositories = await getInventoryRepositories();
+  const { rows, total } = await repositories.notifications.listForUser(
+    userId,
+    query.limit,
+    offset,
+    query.unread_only,
+  );
   return {
-    notifications: (data ?? []).map((row) => mapNotification(row as Record<string, unknown>)),
+    notifications: rows.map((row) => mapNotification(row as unknown as Record<string, unknown>)),
     pagination: {
-      page,
-      limit,
-      total: count ?? 0,
-      totalPages: Math.ceil((count ?? 0) / limit),
+      page: query.page,
+      limit: query.limit,
+      total,
+      totalPages: Math.ceil(total / query.limit),
     },
   };
 }
 
-/** Mark one notification as read, scoped to the authenticated recipient. */
 export async function markNotificationRead(notificationId: string, userId: string) {
-  const { data, error } = await supabaseAdmin
-    .from('notifications')
-    .update({ read_at: new Date().toISOString() })
-    .eq('id', notificationId)
-    .eq('user_id', userId)
-    .select()
-    .maybeSingle();
-
-  if (error) {
-    logger.error(
-      { error: error.message, notificationId, userId },
-      'Failed to mark notification as read',
-    );
-    throw new AppError(500, 'Failed to mark notification as read', 'INTERNAL_ERROR');
-  }
-
-  if (!data) {
-    throw new AppError(404, 'Notification not found', 'NOTIFICATION_NOT_FOUND');
-  }
-
-  return { notification: mapNotification(data as Record<string, unknown>) };
+  const repositories = await getInventoryRepositories();
+  const row = await repositories.notifications.markRead(notificationId, userId);
+  if (!row) throw new AppError(404, 'Notification not found', 'NOTIFICATION_NOT_FOUND');
+  return { notification: mapNotification(row as unknown as Record<string, unknown>) };
 }
 
-/** Save the authenticated user's complete notification preference set. */
 export async function saveNotificationPreferences(
   userId: string,
   payload: NotificationPreferenceSchema,
 ) {
-  const { data, error } = await supabaseAdmin
-    .from('notification_preferences')
-    .upsert(
-      {
-        user_id: userId,
-        ...payload,
-      },
-      { onConflict: 'user_id' },
-    )
-    .select()
-    .single();
-
-  if (error) {
-    logger.error({ error: error.message, userId }, 'Failed to save notification preferences');
-    throw new AppError(500, 'Failed to save notification preferences', 'INTERNAL_ERROR');
-  }
-
-  return { preferences: mapNotificationPreferences(data as Record<string, unknown>) };
+  const repositories = await getInventoryRepositories();
+  const row = await repositories.notificationPreferences.upsert({
+    userId,
+    dueSoonEnabled: payload.due_soon_enabled,
+    overdueEnabled: payload.overdue_enabled,
+    returnsEnabled: payload.returns_enabled,
+    itemUpdatesEnabled: payload.item_updates_enabled,
+    householdActivityEnabled: payload.household_activity_enabled,
+    weeklySummaryEnabled: payload.weekly_summary_enabled,
+    pauseAll: payload.pause_all,
+  });
+  if (!row) throw new AppError(500, 'Failed to save notification preferences', 'INTERNAL_ERROR');
+  return { preferences: mapNotificationPreferences(row as unknown as Record<string, unknown>) };
 }
 
-/**
- * Fan out a return event to the other members of the household.
- * Notification delivery is best-effort so a notification write cannot undo a
- * successful item return.
- */
 export async function createItemReturnedNotifications(input: {
   householdId: string;
   itemId: string;
@@ -131,169 +86,84 @@ export async function createItemReturnedNotifications(input: {
   borrowedBy: string | null;
   note: string | null;
 }) {
-  const { data: memberships, error: membershipError } = await supabaseAdmin
-    .from('memberships')
-    .select('user_id')
-    .eq('household_id', input.householdId);
-
-  if (membershipError) {
-    logger.error(
-      { error: membershipError.message, householdId: input.householdId, itemId: input.itemId },
-      'Failed to find notification recipients for returned item',
-    );
-    return;
-  }
-
-  const recipientIds = (memberships ?? [])
-    .map((membership) => membership.user_id)
-    .filter((userId) => userId !== input.actorUserId);
-
-  if (recipientIds.length === 0) return;
-
-  const { error: notificationError } = await supabaseAdmin.from('notifications').insert(
-    recipientIds.map((userId) => ({
-      user_id: userId,
-      household_id: input.householdId,
-      item_id: input.itemId,
-      notification_type: 'item_returned' as const,
-      title: `${input.itemName} was returned`,
-      body: 'A household member marked this item as returned.',
-      data: {
+  try {
+    const repositories = await getInventoryRepositories();
+    const recipientIds = (await repositories.memberships.listByHousehold(input.householdId))
+      .map(({ membership }) => membership.userId)
+      .filter((userId) => userId !== input.actorUserId);
+    if (recipientIds.length === 0) return;
+    await repositories.notifications.create(
+      recipientIds.map((userId) => ({
+        userId,
+        householdId: input.householdId,
         itemId: input.itemId,
-        returnedBy: input.actorUserId,
-        borrowedBy: input.borrowedBy,
-        note: input.note,
-      },
-    })),
-  );
-
-  if (notificationError) {
-    logger.error(
-      { error: notificationError.message, householdId: input.householdId, itemId: input.itemId },
-      'Failed to create returned item notifications',
+        notificationType: 'item_returned' as const,
+        title: `${input.itemName} was returned`,
+        body: 'A household member marked this item as returned.',
+        data: {
+          itemId: input.itemId,
+          returnedBy: input.actorUserId,
+          borrowedBy: input.borrowedBy,
+          note: input.note,
+        },
+      })),
     );
+  } catch (err) {
+    logger.error({ err, householdId: input.householdId, itemId: input.itemId }, 'Failed to create returned item notifications');
   }
 }
 
-/** Clear overdue reminders tied to a checkout after that checkout is returned. */
 export async function clearOverdueNotifications(itemId: string, borrowRecordId: string) {
   if (!borrowRecordId) return;
-
-  const { error } = await supabaseAdmin
-    .from('notifications')
-    .delete()
-    .eq('item_id', itemId)
-    .eq('notification_type', 'return_overdue')
-    .contains('data', { borrowRecordId });
-
-  if (error) {
-    logger.error(
-      { error: error.message, itemId, borrowRecordId },
-      'Failed to clear overdue notifications after return',
-    );
+  try {
+    const repositories = await getInventoryRepositories();
+    await repositories.notifications.removeOverdue(itemId, borrowRecordId);
+  } catch (err) {
+    logger.error({ err, itemId, borrowRecordId }, 'Failed to clear overdue notifications after return');
   }
 }
 
-/**
- * Create one overdue reminder per recipient for each active overdue borrow.
- * The database unique index is the final race-safe duplicate guard; a
- * duplicate insert is counted and ignored so the rest of the job can continue.
- */
 export async function runOverdueReminderJob(now: Date = new Date()) {
-  const { data: borrowRecords, error: borrowError } = await supabaseAdmin
-    .from('borrow_records')
-    .select('id, item_id, household_id, borrowed_by, due_at, items(name)')
-    .is('returned_at', null)
-    .not('due_at', 'is', null)
-    .lt('due_at', now.toISOString());
-
-  if (borrowError) {
-    logger.error({ error: borrowError.message }, 'Failed to load overdue borrow records');
-    return { overdueRecords: 0, notificationsCreated: 0, duplicatesSkipped: 0 };
-  }
-
+  const repositories = await getInventoryRepositories();
+  const records = await repositories.borrowRecords.listOverdue(now);
   let notificationsCreated = 0;
   let duplicatesSkipped = 0;
-
-  for (const rawRecord of borrowRecords ?? []) {
-    const record = rawRecord as Record<string, unknown>;
-    const { data: memberships, error: membershipError } = await supabaseAdmin
-      .from('memberships')
-      .select('user_id')
-      .eq('household_id', record.household_id as string);
-
-    if (membershipError) {
-      logger.error(
-        { error: membershipError.message, householdId: record.household_id },
-        'Failed to load overdue notification recipients',
-      );
-      continue;
-    }
-
-    const recipientIds = (memberships ?? []).map((membership) => membership.user_id);
-    if (recipientIds.length === 0) continue;
-
-    const { data: preferences, error: preferenceError } = await supabaseAdmin
-      .from('notification_preferences')
-      .select('user_id, overdue_enabled, pause_all')
-      .in('user_id', recipientIds);
-
-    if (preferenceError) {
-      logger.error(
-        { error: preferenceError.message, householdId: record.household_id },
-        'Failed to load overdue notification preferences',
-      );
-      continue;
-    }
-
-    const preferenceByUserId = new Map(
-      (preferences ?? []).map((preference) => [preference.user_id, preference]),
-    );
-    const relatedItem = Array.isArray(record.items) ? record.items[0] : record.items;
-    const itemName =
-      relatedItem && typeof relatedItem === 'object'
-        ? String((relatedItem as Record<string, unknown>).name ?? 'Item')
-        : 'Item';
-
+  for (const { record, item } of records) {
+    const recipients = await repositories.memberships.listByHousehold(record.householdId);
+    const recipientIds = recipients.map(({ membership }) => membership.userId);
+    const preferences = await repositories.notificationPreferences.listByUserIds(recipientIds);
+    const preferenceByUserId = new Map(preferences.map((preference) => [preference.userId, preference]));
     for (const userId of recipientIds) {
       const preference = preferenceByUserId.get(userId);
-      if (preference && (!preference.overdue_enabled || preference.pause_all)) continue;
-
-      const { error: notificationError } = await supabaseAdmin.from('notifications').insert({
-        user_id: userId,
-        household_id: record.household_id as string,
-        item_id: record.item_id as string,
-        notification_type: 'return_overdue',
-        title: `${itemName} is overdue`,
-        body: 'This item is overdue and needs to be returned.',
-        data: {
-          borrowRecordId: String(record.id),
-          itemId: String(record.item_id),
-          borrowedBy: record.borrowed_by === null ? null : String(record.borrowed_by),
-          dueAt: String(record.due_at),
-        } as Json,
-      });
-
-      if (notificationError?.code === '23505') {
+      if (preference && (!preference.overdueEnabled || preference.pauseAll)) continue;
+      const recordId = String(record.id);
+      if (await repositories.notifications.existsOverdue(userId, record.itemId, recordId)) {
         duplicatesSkipped += 1;
-      } else if (notificationError) {
-        logger.error(
-          {
-            error: notificationError.message,
-            householdId: record.household_id,
-            borrowRecordId: record.id,
-            userId,
+        continue;
+      }
+      try {
+        await repositories.notifications.create({
+          userId,
+          householdId: record.householdId,
+          itemId: record.itemId,
+          notificationType: 'return_overdue',
+          title: `${item.name} is overdue`,
+          body: 'This item is overdue and needs to be returned.',
+          data: {
+            borrowRecordId: recordId,
+            itemId: String(record.itemId),
+            borrowedBy: record.borrowedBy,
+            dueAt: record.dueAt,
           },
-          'Failed to create overdue notification',
-        );
-      } else {
+        });
         notificationsCreated += 1;
+      } catch (err) {
+        logger.error({ err, userId, borrowRecordId: recordId }, 'Failed to create overdue notification');
       }
     }
   }
-
   return {
-    overdueRecords: borrowRecords?.length ?? 0,
+    overdueRecords: records.length,
     notificationsCreated,
     duplicatesSkipped,
   };

@@ -68,12 +68,8 @@ export {
 } from './storage-spot.schema.js';
 
 export {
-  googleCallbackSchema,
-  refreshTokenSchema,
   registerSchema,
   loginSchema,
-  type GoogleCallbackSchema,
-  type RefreshTokenSchema,
   type RegisterSchema,
   type LoginSchema,
 } from './auth.schema.js';

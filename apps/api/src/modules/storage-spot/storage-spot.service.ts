@@ -1,202 +1,128 @@
 import type { CreateStorageSpotSchema, UpdateStorageSpotSchema } from '@leonorevault/shared';
-import { supabaseAdmin } from '../../config/supabase.js';
+import { getInventoryRepositories } from '../../db/repositories/runtime.js';
 import { AppError } from '../../middleware/errorHandler.js';
 import { logger } from '../../middleware/logger.js';
 
 interface StorageSpotRow {
   id: string;
-  household_id: string;
-  qr_token: string;
-  name: string;
-  parent_id: string | null;
-  spot_type: 'room' | 'cabinet' | 'shelf' | 'drawer' | 'box' | 'other';
-  description: string | null;
-  capacity: number;
-  sort_order: number;
-  created_at: string;
-  updated_at: string;
-}
-
-interface StorageSpotItemRow {
-  id: string;
-  qr_token: string;
-  name: string;
-  description: string | null;
-  category_id: string | null;
-  location_id: string | null;
-  storage_spot_id: string | null;
-  quantity: number;
-  tags: string[];
-  status: 'stored' | 'borrowed' | 'lost' | 'in_lost_found';
-  borrowed_by: string | null;
-  borrow_due_date: string | null;
-  updated_at: string;
-}
-
-export interface StorageSpotTreeNode {
-  id: string;
   householdId: string;
   qrToken: string;
   name: string;
   parentId: string | null;
-  spotType: StorageSpotRow['spot_type'];
+  spotType: 'room' | 'cabinet' | 'shelf' | 'drawer' | 'box' | 'other';
   description: string | null;
   capacity: number;
   sortOrder: number;
-  createdAt: string;
-  updatedAt: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+interface StorageSpotTreeNode extends StorageSpotRow {
   children: StorageSpotTreeNode[];
 }
 
 function mapStorageSpot(row: StorageSpotRow): Omit<StorageSpotTreeNode, 'children'> {
-  return {
-    id: row.id,
-    householdId: row.household_id,
-    qrToken: row.qr_token,
-    name: row.name,
-    parentId: row.parent_id,
-    spotType: row.spot_type,
-    description: row.description,
-    capacity: row.capacity,
-    sortOrder: row.sort_order,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
+  return { ...row };
 }
 
 function buildTree(flat: StorageSpotRow[]): StorageSpotTreeNode[] {
   const byId = new Map<string, StorageSpotTreeNode>();
   const roots: StorageSpotTreeNode[] = [];
-
-  for (const row of flat) {
-    byId.set(row.id, { ...mapStorageSpot(row), children: [] });
-  }
-
+  for (const row of flat) byId.set(row.id, { ...mapStorageSpot(row), children: [] });
   for (const node of byId.values()) {
-    if (node.parentId && byId.has(node.parentId)) {
-      byId.get(node.parentId)!.children.push(node);
-    } else {
-      roots.push(node);
-    }
+    if (node.parentId && byId.has(node.parentId)) byId.get(node.parentId)!.children.push(node);
+    else roots.push(node);
   }
-
   const sortChildren = (nodes: StorageSpotTreeNode[]) => {
     nodes.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
     for (const node of nodes) sortChildren(node.children);
   };
   sortChildren(roots);
-
   return roots;
 }
 
-function mapItem(row: StorageSpotItemRow) {
+function mapItem(row: Record<string, unknown>) {
   return {
     id: row.id,
-    qrToken: row.qr_token,
+    qrToken: row.qrToken,
     name: row.name,
-    description: row.description,
-    categoryId: row.category_id,
-    locationId: row.location_id,
-    storageSpotId: row.storage_spot_id,
+    description: row.description ?? null,
+    categoryId: row.categoryId ?? null,
+    locationId: row.locationId ?? null,
+    storageSpotId: row.storageSpotId ?? null,
     quantity: row.quantity,
-    tags: row.tags,
+    tags: row.tags ?? [],
     status: row.status,
-    borrowedBy: row.borrowed_by,
-    borrowDueDate: row.borrow_due_date,
-    updatedAt: row.updated_at,
+    borrowedBy: row.borrowedBy ?? null,
+    borrowDueDate: row.borrowDueDate ?? null,
+    updatedAt: row.updatedAt,
   };
 }
 
-function mapDatabaseError(error: { code?: string; message: string }, action: string): never {
-  if (
-    error.code === '23505' ||
-    error.message.includes('duplicate') ||
-    error.message.includes('unique')
-  ) {
+function mapDatabaseError(err: unknown, action: string): never {
+  const message = err instanceof Error ? err.message : String(err);
+  if (message.includes('UNIQUE') || message.includes('unique')) {
     throw new AppError(
       409,
       'A storage spot with this name already exists at this level',
       'DUPLICATE',
     );
   }
-  if (error.code === '23503' || error.message.includes('foreign key')) {
+  if (message.includes('FOREIGN KEY') || message.includes('foreign key')) {
     throw new AppError(400, 'The selected parent storage spot is invalid', 'INVALID_PARENT');
   }
-  logger.error({ error: error.message }, `Failed to ${action} storage spot`);
+  logger.error({ err }, `Failed to ${action} storage spot`);
   throw new AppError(500, `Failed to ${action} storage spot`, 'INTERNAL_ERROR');
 }
 
 export async function getStorageSpotTree(householdId: string) {
-  const { data, error } = await supabaseAdmin
-    .from('storage_spots')
-    .select('*')
-    .eq('household_id', householdId)
-    .order('sort_order', { ascending: true })
-    .order('name', { ascending: true });
-
-  if (error) mapDatabaseError(error, 'fetch');
-
-  return { tree: buildTree((data || []) as StorageSpotRow[]) };
+  try {
+    const repositories = await getInventoryRepositories();
+    const rows = await repositories.storageSpots.listByHousehold(householdId);
+    return { tree: buildTree(rows as unknown as StorageSpotRow[]) };
+  } catch (err) {
+    mapDatabaseError(err, 'fetch');
+  }
 }
 
 export async function getStorageSpotDetail(storageSpotId: string, householdId: string) {
-  const { data: spot, error: spotError } = await supabaseAdmin
-    .from('storage_spots')
-    .select('*')
-    .eq('id', storageSpotId)
-    .eq('household_id', householdId)
-    .maybeSingle();
-
-  if (spotError) mapDatabaseError(spotError, 'fetch');
-  if (!spot) throw new AppError(404, 'Storage spot not found', 'NOT_FOUND');
-
-  const [childrenResult, itemsResult] = await Promise.all([
-    supabaseAdmin
-      .from('storage_spots')
-      .select('*')
-      .eq('household_id', householdId)
-      .eq('parent_id', storageSpotId)
-      .order('sort_order', { ascending: true })
-      .order('name', { ascending: true }),
-    supabaseAdmin
-      .from('items')
-      .select(
-        'id,qr_token,name,description,category_id,location_id,storage_spot_id,quantity,tags,status,borrowed_by,borrow_due_date,updated_at',
-      )
-      .eq('household_id', householdId)
-      .eq('storage_spot_id', storageSpotId)
-      .is('deleted_at', null)
-      .order('name', { ascending: true }),
-  ]);
-
-  if (childrenResult.error) mapDatabaseError(childrenResult.error, 'fetch');
-  if (itemsResult.error) mapDatabaseError(itemsResult.error, 'fetch');
-
-  return {
-    storageSpot: mapStorageSpot(spot as StorageSpotRow),
-    children: (childrenResult.data || []).map((row) => mapStorageSpot(row as StorageSpotRow)),
-    items: (itemsResult.data || []).map((row) => mapItem(row as StorageSpotItemRow)),
-  };
+  try {
+    const repositories = await getInventoryRepositories();
+    const spot = await repositories.storageSpots.findByIdInHousehold(storageSpotId, householdId);
+    if (!spot) throw new AppError(404, 'Storage spot not found', 'NOT_FOUND');
+    const [allSpots, itemResult] = await Promise.all([
+      repositories.storageSpots.listByHousehold(householdId),
+      repositories.items.listByHousehold(householdId, { storageSpotId }),
+    ]);
+    const children = allSpots.filter((candidate) => candidate.parentId === storageSpotId);
+    return {
+      storageSpot: mapStorageSpot(spot as unknown as StorageSpotRow),
+      children: children.map((row) => mapStorageSpot(row as unknown as StorageSpotRow)),
+      items: itemResult.items.map((row) => mapItem(row as unknown as Record<string, unknown>)),
+    };
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    mapDatabaseError(err, 'fetch');
+  }
 }
 
 export async function createStorageSpot(householdId: string, payload: CreateStorageSpotSchema) {
-  const { data, error } = await supabaseAdmin
-    .from('storage_spots')
-    .insert({
-      household_id: householdId,
+  try {
+    const repositories = await getInventoryRepositories();
+    const row = await repositories.storageSpots.create({
+      householdId,
       name: payload.name,
-      parent_id: payload.parent_id ?? null,
-      spot_type: payload.spot_type,
+      parentId: payload.parent_id ?? null,
+      spotType: payload.spot_type,
       description: payload.description ?? null,
       capacity: payload.capacity,
-      sort_order: payload.sort_order,
-    })
-    .select()
-    .single();
-
-  if (error) mapDatabaseError(error, 'create');
-
-  return { storageSpot: mapStorageSpot(data as StorageSpotRow) };
+      sortOrder: payload.sort_order,
+    });
+    if (!row) throw new Error('Storage spot insert returned no row');
+    return { storageSpot: mapStorageSpot(row as unknown as StorageSpotRow) };
+  } catch (err) {
+    mapDatabaseError(err, 'create');
+  }
 }
 
 export async function updateStorageSpot(
@@ -206,45 +132,33 @@ export async function updateStorageSpot(
 ) {
   const updateData: Record<string, unknown> = {};
   if (payload.name !== undefined) updateData.name = payload.name;
-  if (payload.parent_id !== undefined) updateData.parent_id = payload.parent_id;
-  if (payload.spot_type !== undefined) updateData.spot_type = payload.spot_type;
+  if (payload.parent_id !== undefined) updateData.parentId = payload.parent_id;
+  if (payload.spot_type !== undefined) updateData.spotType = payload.spot_type;
   if (payload.description !== undefined) updateData.description = payload.description;
   if (payload.capacity !== undefined) updateData.capacity = payload.capacity;
-  if (payload.sort_order !== undefined) updateData.sort_order = payload.sort_order;
-
+  if (payload.sort_order !== undefined) updateData.sortOrder = payload.sort_order;
   if (Object.keys(updateData).length === 0) {
     throw new AppError(400, 'At least one storage spot field is required', 'EMPTY_UPDATE');
   }
-
-  const { data, error } = await supabaseAdmin
-    .from('storage_spots')
-    .update(updateData)
-    .eq('id', storageSpotId)
-    .eq('household_id', householdId)
-    .select()
-    .single();
-
-  if (error) {
-    if (error.code === 'PGRST116') {
-      throw new AppError(404, 'Storage spot not found', 'NOT_FOUND');
-    }
-    mapDatabaseError(error, 'update');
+  try {
+    const repositories = await getInventoryRepositories();
+    const row = await repositories.storageSpots.update(storageSpotId, householdId, updateData);
+    if (!row) throw new AppError(404, 'Storage spot not found', 'NOT_FOUND');
+    return { storageSpot: mapStorageSpot(row as unknown as StorageSpotRow) };
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    mapDatabaseError(err, 'update');
   }
-
-  return { storageSpot: mapStorageSpot(data as StorageSpotRow) };
 }
 
 export async function deleteStorageSpot(storageSpotId: string, householdId: string) {
-  const { data, error } = await supabaseAdmin
-    .from('storage_spots')
-    .delete()
-    .eq('id', storageSpotId)
-    .eq('household_id', householdId)
-    .select('id')
-    .maybeSingle();
-
-  if (error) mapDatabaseError(error, 'delete');
-  if (!data) throw new AppError(404, 'Storage spot not found', 'NOT_FOUND');
-
-  return { deleted: true, id: storageSpotId };
+  try {
+    const repositories = await getInventoryRepositories();
+    const deleted = await repositories.storageSpots.remove(storageSpotId, householdId);
+    if (!deleted) throw new AppError(404, 'Storage spot not found', 'NOT_FOUND');
+    return { deleted: true, id: storageSpotId };
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    mapDatabaseError(err, 'delete');
+  }
 }

@@ -2,8 +2,7 @@ import { NextResponse } from 'next/server';
 
 /**
  * GET /auth/callback
- * Local mock callback. The real Better Auth callback will replace this route
- * once the authentication backend is connected.
+ * Better Auth redirects here after completing the provider callback.
  */
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);

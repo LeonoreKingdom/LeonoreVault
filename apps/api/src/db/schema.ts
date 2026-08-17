@@ -24,10 +24,73 @@ export const users = sqliteTable(
     email: text('email').notNull(),
     displayName: text('display_name'),
     avatarUrl: text('avatar_url'),
+    emailVerified: integer('email_verified', { mode: 'boolean' }).notNull().default(false),
     createdAt: timestamp('created_at'),
     updatedAt: timestamp('updated_at'),
   },
   (table) => [uniqueIndex('users_email_unique').on(table.email)],
+);
+
+export const sessions = sqliteTable(
+  'sessions',
+  {
+    id: id(),
+    expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+    token: text('token').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    ipAddress: text('ip_address'),
+    userAgent: text('user_agent'),
+    createdAt: timestamp('created_at'),
+    updatedAt: timestamp('updated_at'),
+  },
+  (table) => [
+    uniqueIndex('sessions_token_unique').on(table.token),
+    index('idx_sessions_user').on(table.userId),
+    index('idx_sessions_expires_at').on(table.expiresAt),
+  ],
+);
+
+export const accounts = sqliteTable(
+  'accounts',
+  {
+    id: id(),
+    accountId: text('account_id').notNull(),
+    providerId: text('provider_id').notNull(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    accessToken: text('access_token'),
+    refreshToken: text('refresh_token'),
+    accessTokenExpiresAt: integer('access_token_expires_at', { mode: 'timestamp_ms' }),
+    refreshTokenExpiresAt: integer('refresh_token_expires_at', { mode: 'timestamp_ms' }),
+    scope: text('scope'),
+    idToken: text('id_token'),
+    password: text('password'),
+    createdAt: timestamp('created_at'),
+    updatedAt: timestamp('updated_at'),
+  },
+  (table) => [
+    uniqueIndex('accounts_provider_account_unique').on(table.providerId, table.accountId),
+    index('idx_accounts_user').on(table.userId),
+  ],
+);
+
+export const verifications = sqliteTable(
+  'verifications',
+  {
+    id: id(),
+    identifier: text('identifier').notNull(),
+    value: text('value').notNull(),
+    expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+    createdAt: timestamp('created_at'),
+    updatedAt: timestamp('updated_at'),
+  },
+  (table) => [
+    index('idx_verifications_identifier').on(table.identifier),
+    index('idx_verifications_expires_at').on(table.expiresAt),
+  ],
 );
 
 export const households = sqliteTable(
@@ -321,6 +384,9 @@ export const notificationPreferences = sqliteTable('notification_preferences', {
 
 export const schema = {
   users,
+  sessions,
+  accounts,
+  verifications,
   households,
   memberships,
   categories,

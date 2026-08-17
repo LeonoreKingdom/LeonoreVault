@@ -56,6 +56,22 @@ export async function listAttachments(req: Request, res: Response, next: NextFun
   }
 }
 
+/** GET /api/households/:householdId/items/:itemId/attachments/:attachmentId/url */
+export async function getAttachmentUrl(req: Request, res: Response, next: NextFunction) {
+  try {
+    const variant = req.query.variant === 'thumbnail' ? 'thumbnail' : 'original';
+    const result = await svc.getAttachmentUrl(
+      param(req, 'attachmentId'),
+      param(req, 'itemId'),
+      param(req, 'householdId'),
+      variant,
+    );
+    res.json({ success: true, data: result });
+  } catch (err) {
+    next(err);
+  }
+}
+
 /** DELETE /api/households/:householdId/items/:itemId/attachments/:attachmentId */
 export async function deleteAttachment(req: Request, res: Response, next: NextFunction) {
   try {

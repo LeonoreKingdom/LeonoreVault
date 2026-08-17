@@ -1,15 +1,13 @@
-import { supabaseAdmin } from '../../config/supabase.js';
+import { getInventoryRepositories } from '../../db/repositories/runtime.js';
 import { AppError } from '../../middleware/errorHandler.js';
 import { logger } from '../../middleware/logger.js';
-
-// ─── Types ──────────────────────────────────────────────────
 
 interface SyncMutation {
   type: 'create' | 'update' | 'delete';
   table: string;
   entityId: string;
   payload: Record<string, unknown>;
-  updatedAt: string; // ISO timestamp from client
+  updatedAt: string;
 }
 
 interface SyncResult {
@@ -20,33 +18,27 @@ interface SyncResult {
   message?: string;
 }
 
-// ─── Map DB rows to API shapes (camelCase) ──────────────────
-
 function mapItem(row: Record<string, unknown>) {
   return {
     id: row.id,
-    householdId: row.household_id,
+    householdId: row.householdId,
     name: row.name,
     description: row.description ?? null,
-    categoryId: row.category_id ?? null,
-    locationId: row.location_id ?? null,
+    categoryId: row.categoryId ?? null,
+    locationId: row.locationId ?? null,
+    storageSpotId: row.storageSpotId ?? null,
     quantity: row.quantity,
     tags: row.tags ?? [],
     status: row.status,
-    createdBy: row.created_by,
-    borrowedBy: row.borrowed_by ?? null,
-    borrowDueDate: row.borrow_due_date ?? null,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    deletedAt: row.deleted_at ?? null,
+    createdBy: row.createdBy,
+    borrowedBy: row.borrowedBy ?? null,
+    borrowDueDate: row.borrowDueDate ?? null,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    deletedAt: row.deletedAt ?? null,
   };
 }
 
-// ─── Service ────────────────────────────────────────────────
-
-/**
- * Process a batch of offline mutations using last-write-wins.
- */
 export async function processSyncBatch(
   householdId: string,
   userId: string,
@@ -54,52 +46,23 @@ export async function processSyncBatch(
 ): Promise<{ applied: SyncResult[]; conflicts: SyncResult[] }> {
   const applied: SyncResult[] = [];
   const conflicts: SyncResult[] = [];
-
   for (const mutation of mutations) {
     try {
       if (mutation.table !== 'items') {
-        conflicts.push({
-          entityId: mutation.entityId,
-          type: mutation.type,
-          status: 'error',
-          message: `Sync not supported for table: ${mutation.table}`,
-        });
+        conflicts.push({ entityId: mutation.entityId, type: mutation.type, status: 'error', message: `Sync not supported for table: ${mutation.table}` });
         continue;
       }
-
-      switch (mutation.type) {
-        case 'create':
-          await handleCreate(householdId, userId, mutation, applied);
-          break;
-        case 'update':
-          await handleUpdate(householdId, mutation, applied, conflicts);
-          break;
-        case 'delete':
-          await handleDelete(householdId, mutation, applied, conflicts);
-          break;
-        default:
-          conflicts.push({
-            entityId: mutation.entityId,
-            type: mutation.type,
-            status: 'error',
-            message: `Unknown mutation type: ${mutation.type}`,
-          });
-      }
+      if (mutation.type === 'create') await handleCreate(householdId, userId, mutation, applied);
+      else if (mutation.type === 'update') await handleUpdate(householdId, mutation, applied, conflicts);
+      else if (mutation.type === 'delete') await handleDelete(householdId, mutation, applied, conflicts);
+      else conflicts.push({ entityId: mutation.entityId, type: mutation.type, status: 'error', message: `Unknown mutation type: ${mutation.type}` });
     } catch (err) {
       logger.error({ err, mutation }, 'Sync mutation failed');
-      conflicts.push({
-        entityId: mutation.entityId,
-        type: mutation.type,
-        status: 'error',
-        message: (err as Error).message,
-      });
+      conflicts.push({ entityId: mutation.entityId, type: mutation.type, status: 'error', message: err instanceof Error ? err.message : String(err) });
     }
   }
-
   return { applied, conflicts };
 }
-
-// ─── Mutation handlers ──────────────────────────────────────
 
 async function handleCreate(
   householdId: string,
@@ -108,36 +71,21 @@ async function handleCreate(
   applied: SyncResult[],
 ) {
   const p = mutation.payload;
-
-  const insertData: Record<string, unknown> = {
-    id: mutation.entityId, // Use client-generated UUID
-    household_id: householdId,
-    created_by: userId,
-    name: p.name,
-    description: p.description ?? null,
-    category_id: p.categoryId ?? p.category_id ?? null,
-    location_id: p.locationId ?? p.location_id ?? null,
-    quantity: p.quantity ?? 1,
+  const repositories = await getInventoryRepositories();
+  const row = await repositories.items.create({
+    id: mutation.entityId,
+    householdId,
+    createdBy: userId,
+    name: String(p.name ?? ''),
+    description: (p.description as string | null | undefined) ?? null,
+    categoryId: (p.categoryId ?? p.category_id ?? null) as string | null,
+    locationId: (p.locationId ?? p.location_id ?? null) as string | null,
+    quantity: Number(p.quantity ?? 1),
     tags: (p.tags as string[]) ?? [],
-    status: p.status ?? 'stored',
-  };
-
-  const { data, error } = await supabaseAdmin
-    .from('items')
-    .insert(insertData as never)
-    .select()
-    .single();
-
-  if (error) {
-    throw new AppError(500, `Failed to sync-create item: ${error.message}`, 'SYNC_ERROR');
-  }
-
-  applied.push({
-    entityId: mutation.entityId,
-    type: 'create',
-    status: 'applied',
-    serverVersion: mapItem(data),
+    status: (p.status as 'stored' | 'borrowed' | 'lost' | 'in_lost_found') ?? 'stored',
   });
+  if (!row) throw new AppError(500, 'Failed to sync-create item', 'SYNC_ERROR');
+  applied.push({ entityId: mutation.entityId, type: 'create', status: 'applied', serverVersion: mapItem(row as unknown as Record<string, unknown>) });
 }
 
 async function handleUpdate(
@@ -146,119 +94,41 @@ async function handleUpdate(
   applied: SyncResult[],
   conflicts: SyncResult[],
 ) {
-  // Fetch current server version
-  const { data: current, error: fetchErr } = await supabaseAdmin
-    .from('items')
-    .select('*')
-    .eq('id', mutation.entityId)
-    .eq('household_id', householdId)
-    .is('deleted_at', null)
-    .single();
-
-  if (fetchErr || !current) {
-    conflicts.push({
-      entityId: mutation.entityId,
-      type: 'update',
-      status: 'error',
-      message: 'Item not found on server',
-    });
+  const repositories = await getInventoryRepositories();
+  const current = await repositories.items.findById(mutation.entityId, householdId);
+  if (!current || current.deletedAt) {
+    conflicts.push({ entityId: mutation.entityId, type: 'update', status: 'error', message: 'Item not found on server' });
     return;
   }
-
-  // Last-write-wins: compare timestamps
-  const serverUpdatedAt = new Date(current.updated_at as string).getTime();
-  const clientUpdatedAt = new Date(mutation.updatedAt).getTime();
-
-  if (serverUpdatedAt > clientUpdatedAt) {
-    // Server is newer — conflict, keep server version
-    conflicts.push({
-      entityId: mutation.entityId,
-      type: 'update',
-      status: 'conflict',
-      serverVersion: mapItem(current),
-      message: 'Server version is newer',
-    });
+  if (current.updatedAt.getTime() > new Date(mutation.updatedAt).getTime()) {
+    conflicts.push({ entityId: mutation.entityId, type: 'update', status: 'conflict', serverVersion: mapItem(current as unknown as Record<string, unknown>), message: 'Server version is newer' });
     return;
   }
-
-  // Client wins — apply update
   const p = mutation.payload;
   const updateData: Record<string, unknown> = {};
   if (p.name !== undefined) updateData.name = p.name;
   if (p.description !== undefined) updateData.description = p.description;
-  if (p.categoryId !== undefined) updateData.category_id = p.categoryId;
-  if (p.category_id !== undefined) updateData.category_id = p.category_id;
-  if (p.locationId !== undefined) updateData.location_id = p.locationId;
-  if (p.location_id !== undefined) updateData.location_id = p.location_id;
+  if (p.categoryId !== undefined || p.category_id !== undefined) updateData.categoryId = p.categoryId ?? p.category_id;
+  if (p.locationId !== undefined || p.location_id !== undefined) updateData.locationId = p.locationId ?? p.location_id;
   if (p.quantity !== undefined) updateData.quantity = p.quantity;
   if (p.tags !== undefined) updateData.tags = p.tags;
   if (p.status !== undefined) updateData.status = p.status;
-
-  const { data, error } = await supabaseAdmin
-    .from('items')
-    .update(updateData)
-    .eq('id', mutation.entityId)
-    .eq('household_id', householdId)
-    .select()
-    .single();
-
-  if (error) {
-    throw new AppError(500, `Failed to sync-update item: ${error.message}`, 'SYNC_ERROR');
-  }
-
-  applied.push({
-    entityId: mutation.entityId,
-    type: 'update',
-    status: 'applied',
-    serverVersion: mapItem(data),
-  });
+  const row = await repositories.items.update(mutation.entityId, householdId, updateData as never);
+  if (!row) throw new AppError(500, 'Failed to sync-update item', 'SYNC_ERROR');
+  applied.push({ entityId: mutation.entityId, type: 'update', status: 'applied', serverVersion: mapItem(row as unknown as Record<string, unknown>) });
 }
 
 async function handleDelete(
   householdId: string,
   mutation: SyncMutation,
   applied: SyncResult[],
-  conflicts: SyncResult[],
+  _conflicts: SyncResult[],
 ) {
-  // Check if item exists
-  const { data: current } = await supabaseAdmin
-    .from('items')
-    .select('id, updated_at')
-    .eq('id', mutation.entityId)
-    .eq('household_id', householdId)
-    .is('deleted_at', null)
-    .single();
-
-  if (!current) {
-    // Already deleted or doesn't exist — mark as applied
-    applied.push({
-      entityId: mutation.entityId,
-      type: 'delete',
-      status: 'applied',
-    });
-    return;
+  const repositories = await getInventoryRepositories();
+  const current = await repositories.items.findById(mutation.entityId, householdId);
+  if (current && !current.deletedAt) {
+    const deleted = await repositories.items.softDelete(mutation.entityId, householdId);
+    if (!deleted) throw new AppError(500, 'Failed to sync-delete item', 'SYNC_ERROR');
   }
-
-  // Soft-delete
-  const { error } = await supabaseAdmin
-    .from('items')
-    .update({ deleted_at: new Date().toISOString() })
-    .eq('id', mutation.entityId)
-    .eq('household_id', householdId);
-
-  if (error) {
-    conflicts.push({
-      entityId: mutation.entityId,
-      type: 'delete',
-      status: 'error',
-      message: `Failed to delete: ${error.message}`,
-    });
-    return;
-  }
-
-  applied.push({
-    entityId: mutation.entityId,
-    type: 'delete',
-    status: 'applied',
-  });
+  applied.push({ entityId: mutation.entityId, type: 'delete', status: 'applied' });
 }

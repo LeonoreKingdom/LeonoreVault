@@ -19,7 +19,8 @@ import {
 interface Attachment {
   id: string;
   itemId: string;
-  driveFileId: string;
+  objectKey: string;
+  bucket: string;
   fileName: string;
   mimeType: string;
   thumbnailUrl: string | null;

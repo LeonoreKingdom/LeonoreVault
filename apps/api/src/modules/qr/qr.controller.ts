@@ -24,7 +24,12 @@ export async function generateQr(req: Request, res: Response, next: NextFunction
     const format = (req.query.format as string) === 'svg' ? 'svg' : 'png';
     const size = Math.min(1024, Math.max(64, Number(req.query.size) || 256));
 
-    const { data, contentType } = await svc.generateQrCode(itemId, format, size);
+    const { data, contentType } = await svc.generateQrCode(
+      param(req, 'householdId'),
+      itemId,
+      format,
+      size,
+    );
 
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cache-Control', 'public, max-age=86400');

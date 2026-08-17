@@ -1,27 +1,28 @@
 import type { Request, Response, NextFunction } from 'express';
 import {
-  handleGoogleCallback,
-  handleRefreshToken,
   getCurrentUser,
   handleRegister,
   handleLogin,
   handleLogout,
 } from './auth.service.js';
 import type {
-  GoogleCallbackSchema,
-  RefreshTokenSchema,
   RegisterSchema,
   LoginSchema,
 } from '@leonorevault/shared';
 
-function bearerToken(req: Request): string {
-  return req.headers.authorization!.slice(7);
+function requestHeaders(req: Request): Headers {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (Array.isArray(value)) headers.set(key, value.join(', '));
+    else if (value !== undefined) headers.set(key, value);
+  }
+  return headers;
 }
 
 /** POST /api/auth/register */
 export async function register(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const result = await handleRegister(req.body as RegisterSchema);
+    const result = await handleRegister(req.body as RegisterSchema, requestHeaders(req));
     res.status(201).json({ success: true, data: result });
   } catch (err) {
     next(err);
@@ -31,7 +32,7 @@ export async function register(req: Request, res: Response, next: NextFunction):
 /** POST /api/auth/login */
 export async function login(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const result = await handleLogin(req.body as LoginSchema);
+    const result = await handleLogin(req.body as LoginSchema, requestHeaders(req));
     res.status(200).json({ success: true, data: result });
   } catch (err) {
     next(err);
@@ -41,46 +42,8 @@ export async function login(req: Request, res: Response, next: NextFunction): Pr
 /** POST /api/auth/logout */
 export async function logout(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const result = await handleLogout(bearerToken(req));
+    const result = await handleLogout(requestHeaders(req));
     res.status(200).json({ success: true, data: result });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/**
- * POST /api/auth/google/callback
- * Exchange Google OAuth code for a Supabase session.
- */
-export async function googleCallback(
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> {
-  try {
-    const result = await handleGoogleCallback(req.body as GoogleCallbackSchema);
-
-    res.status(200).json({
-      success: true,
-      data: result,
-    });
-  } catch (err) {
-    next(err);
-  }
-}
-
-/**
- * POST /api/auth/refresh
- * Refresh an expired access token.
- */
-export async function refresh(req: Request, res: Response, next: NextFunction): Promise<void> {
-  try {
-    const result = await handleRefreshToken(req.body as RefreshTokenSchema);
-
-    res.status(200).json({
-      success: true,
-      data: result,
-    });
   } catch (err) {
     next(err);
   }
