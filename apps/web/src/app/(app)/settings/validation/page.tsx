@@ -64,9 +64,9 @@ const validationChecks: ValidationCheck[] = [
   {
     id: 'edge-protection',
     label: 'WAF rate limiting',
-    detail: 'Production rules must be configured and tested at the Cloudflare edge.',
-    value: 'Deployment pending',
-    status: 'review',
+    detail: 'The active Cloudflare zone rule covers Vault auth, sync, attachment uploads, and QR batch endpoints.',
+    value: 'Verified in Cloudflare',
+    status: 'ready',
     icon: ShieldCheck,
   },
 ];
@@ -142,8 +142,8 @@ export default function ValidationDashboardPage() {
               </p>
             </div>
             <p className="mt-3 max-w-xl text-sm leading-relaxed text-white/80">
-              Inventory metadata now resolves from Turso and attachments resolve from Cloudflare R2.
-              The remaining production gate is verification of the deployed WAF rate-limit rule.
+              Inventory metadata resolves from Turso, attachments resolve from Cloudflare R2, and the
+              production WAF rate-limit rule is active for Vault critical endpoints.
             </p>
           </div>
           <div className="absolute -right-8 -top-8 h-36 w-36 rounded-full border-[18px] border-white/10" />
@@ -169,7 +169,7 @@ export default function ValidationDashboardPage() {
             <h2 id="checks-heading" className="text-lg font-bold">
               Validation checks
             </h2>
-            <p className="text-muted mt-0.5 text-sm">Separate implemented source paths from the remaining edge gate.</p>
+            <p className="text-muted mt-0.5 text-sm">Implemented source paths and production edge protection.</p>
           </div>
           <span className="text-muted text-xs font-medium">Revamp phase</span>
         </div>
@@ -209,8 +209,9 @@ export default function ValidationDashboardPage() {
           <div>
             <h2 id="next-heading" className="font-bold">Next validation layer</h2>
             <p className="text-muted mt-1 max-w-2xl text-sm leading-relaxed">
-              Rerun this checklist after the deployed Cloudflare WAF rule has been exercised against
-              the production hostname. The application source no longer depends on local inventory fixtures.
+              The deployed Cloudflare WAF rule is active for the production hostname and protects the
+              authentication, sync, upload, and QR batch paths. The application source no longer depends
+              on local inventory fixtures.
             </p>
           </div>
           <Link

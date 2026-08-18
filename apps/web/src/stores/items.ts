@@ -144,11 +144,12 @@ export const useItemsStore = create<ItemsState>((set, get) => ({
 
   fetchItems: async (householdId) => {
     const { filters } = get();
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    set({ items: isOffline ? get().items : [], loading: true, error: null });
 
-    // ── Phase 1: Serve from Dexie cache instantly ────────
-    try {
-      const cached = await db.items.where('householdId').equals(householdId).toArray();
-      if (cached.length > 0) {
+    if (isOffline) {
+      try {
+        const cached = await db.items.where('householdId').equals(householdId).toArray();
         const { items, total } = applyCacheFilters(cached, filters);
         set({
           items,
@@ -160,15 +161,11 @@ export const useItemsStore = create<ItemsState>((set, get) => ({
           },
           loading: false,
         });
+      } catch {
+        set({ loading: false, error: 'This inventory is not available offline.' });
       }
-    } catch {
-      // IndexedDB unavailable — continue to API
+      return;
     }
-
-    // ── Phase 2: Background fetch from API ──────────────
-    // Turso-backed API data is the source of truth while online. Dexie is only
-    // a read-through/offline cache and must not suppress a fresh API read.
-    if (typeof navigator !== 'undefined' && !navigator.onLine) return;
 
     set({ loading: true, error: null });
     try {
@@ -204,18 +201,24 @@ export const useItemsStore = create<ItemsState>((set, get) => ({
   },
 
   fetchItem: async (householdId, itemId) => {
-    // ── Phase 1: Try Dexie cache ────────────────────────
-    try {
-      const cached = await db.items.get(itemId);
-      if (cached && cached.householdId === householdId) {
-        set({ selectedItem: cached as unknown as Item, loading: false });
+    const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+    set({ selectedItem: null, loading: true, error: null });
+
+    if (isOffline) {
+      try {
+        const cached = await db.items.get(itemId);
+        if (cached && cached.householdId === householdId) {
+          set({ selectedItem: cached as unknown as Item, loading: false });
+          return;
+        }
+      } catch {
+        // Fall through to the offline message below.
       }
-    } catch {
-      // Continue to API
+
+      set({ error: 'This item is not available offline.', loading: false });
+      return;
     }
 
-    // ── Phase 2: Fetch from API ─────────────────────────
-    set({ loading: true, error: null });
     try {
       const data = await apiGet<{ item: Item }>(
         `/api/households/${householdId}/items/${itemId}`,
